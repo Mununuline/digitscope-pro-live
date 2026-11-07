@@ -1,0 +1,12 @@
+{
+  "name": "digitscope-pro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Deriv synthetic-index digit analytics dashboard",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
