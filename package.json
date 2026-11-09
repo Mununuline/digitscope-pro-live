@@ -1,10 +1,15 @@
 {
-  "name": "digitscope-pro",
-  "version": "1.0.0",
+  "name": "digitscope-pro-live",
+  "version": "1.1.0",
   "private": true,
-  "description": "Deriv synthetic-index digit analytics dashboard",
+  "description": "Live Deriv synthetic-index digit analytics dashboard",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/app.js"
   },
   "dependencies": {
     "express": "^4.21.2"
