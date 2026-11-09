@@ -4,26 +4,23 @@
   const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
   const $ = (id) => document.getElementById(id);
   const state = {
-    ws: null,
-    symbols: [],
-    ticks: [],
-    currentSymbol: "",
-    pipSize: 2,
-    reconnectTimer: null,
-    intentionalClose: false,
-    requestId: 10,
-    historyRequestId: null,
-    tickSubscriptionId: null,
-    evalHits: 0,
-    evalCount: 0,
-    lastTickEpoch: null,
-    connectAttempts: 0
+    ws: null, symbols: [], ticks: [], currentSymbol: "", pipSize: 2,
+    reconnectTimer: null, intentionalClose: false, requestId: 10,
+    historyRequestId: null, tickSubscriptionId: null, evalHits: 0,
+    evalCount: 0, lastTickEpoch: null, connectAttempts: 0,
+    symbolsRequestId: null
   };
 
   const numberOf = (value, fallback = 0) => {
     const n = Number(value);
     return Number.isFinite(n) ? n : fallback;
   };
+
+  // Deriv pip_size represents decimal places, e.g. 2 means two decimals.
+  function precisionOf(value, fallback = 2) {
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 0 && n <= 10 ? n : fallback;
+  }
 
   function setConnection(status, message) {
     $("connectionDot").classList.toggle("online", status === "online");
@@ -57,6 +54,18 @@
     return state.requestId;
   }
 
+  function requestSymbols() {
+    if (state.symbolsRequestId !== null) return;
+    state.symbolsRequestId = nextRequestId();
+    if (!send({
+      active_symbols: "brief",
+      product_type: "basic",
+      req_id: state.symbolsRequestId
+    })) {
+      state.symbolsRequestId = null;
+    }
+  }
+
   function connect() {
     clearTimeout(state.reconnectTimer);
     state.intentionalClose = false;
@@ -64,7 +73,7 @@
 
     try {
       state.ws = new WebSocket(WS_URL);
-    } catch (error) {
+    } catch {
       showError("Could not start the market connection. Check your browser and internet connection.");
       scheduleReconnect();
       return;
@@ -72,34 +81,34 @@
 
     state.ws.onopen = () => {
       state.connectAttempts = 0;
+      state.symbolsRequestId = null;
       clearError();
       setConnection("online", "Connected to Deriv public feed");
-      send({ active_symbols: "brief", req_id: nextRequestId() });
+      requestSymbols();
     };
 
     state.ws.onmessage = (event) => {
       let data;
-      try {
-        data = JSON.parse(event.data);
-      } catch {
-        return;
-      }
+      try { data = JSON.parse(event.data); } catch { return; }
 
       if (data.error) {
-        const message = data.error.message || "Deriv returned an API error.";
-        showError(message);
-        if (data.echo_req && data.echo_req.ticks_history) {
-          $("sampleNote").textContent = "History request failed";
+        const message = data.error.message || data.error.code || "Deriv returned an API error.";
+        showError(`Deriv API error: ${message}`);
+        if (data.echo_req?.active_symbols) {
+          state.symbolsRequestId = null;
+          $("marketCount").textContent = "Market list request failed";
         }
+        if (data.echo_req?.ticks_history) $("sampleNote").textContent = "History request failed";
         return;
       }
 
-      if (data.msg_type === "active_symbols") {
+      if (data.msg_type === "active_symbols" || Array.isArray(data.active_symbols)) {
+        state.symbolsRequestId = null;
         handleSymbols(Array.isArray(data.active_symbols) ? data.active_symbols : []);
-      } else if (data.msg_type === "history") {
+      } else if (data.msg_type === "history" || data.history?.prices) {
         handleHistory(data);
-      } else if (data.msg_type === "tick") {
-        handleTick(data.tick, data.subscription);
+      } else if (data.msg_type === "tick" || data.tick) {
+        handleTick(data.tick, data.subscription, data.echo_req);
       }
     };
 
@@ -110,6 +119,8 @@
 
     state.ws.onclose = () => {
       setConnection("offline", "Disconnected. Reconnecting…");
+      state.symbolsRequestId = null;
+      state.tickSubscriptionId = null;
       if (!state.intentionalClose) scheduleReconnect();
     };
   }
@@ -124,17 +135,32 @@
     }, delay);
   }
 
-  function isSyntheticSymbol(item) {
+  // Support both legacy and newer Deriv symbol field names.
+  function normalizeSymbol(item) {
+    const symbol = item.symbol || item.underlying_symbol || "";
+    const displayName = item.display_name || item.underlying_symbol_name ||
+      item.name || symbol;
+    return { ...item, symbol, display_name: displayName };
+  }
+
+  function isSyntheticSymbol(raw) {
+    const item = normalizeSymbol(raw);
     const name = String(item.display_name || "");
     const market = String(item.market || "");
     const submarket = String(item.submarket || "");
-    return /volatility|crash|boom|step|jump|range break|drift/i.test(name) ||
-      /synthetic/i.test(market) || /synthetic/i.test(submarket);
+    const subgroup = String(item.subgroup || "");
+    const symbol = String(item.symbol || "");
+    return /synthetic|derived/i.test(`${market} ${submarket} ${subgroup}`) ||
+      /volatility|crash|boom|step|jump|range break|drift/i.test(name) ||
+      /^(R_|1HZ|JD|CRASH|BOOM|STPRNG)/i.test(symbol);
   }
 
   function handleSymbols(list) {
-    state.symbols = list.filter(isSyntheticSymbol).sort((a, b) =>
-      String(a.display_name || a.symbol).localeCompare(String(b.display_name || b.symbol))
+    const normalized = list.map(normalizeSymbol).filter((item) => item.symbol);
+    const synthetic = normalized.filter(isSyntheticSymbol);
+    // If category metadata is absent, don't leave the selector blank.
+    state.symbols = (synthetic.length ? synthetic : normalized).sort((a, b) =>
+      String(a.display_name).localeCompare(String(b.display_name))
     );
 
     const select = $("symbolSelect");
@@ -142,25 +168,25 @@
     select.replaceChildren();
 
     if (!state.symbols.length) {
-      select.add(new Option("No synthetic markets returned", ""));
-      showError("Deriv did not return any synthetic indices. Refresh the page or check Deriv market availability.");
+      select.add(new Option("No markets returned", ""));
+      $("marketCount").textContent = "0 markets returned";
+      showError("Deriv replied with an empty active-symbol list. Check the API response or try again shortly.");
       return;
     }
 
     state.symbols.forEach((item) => {
-      select.add(new Option(item.display_name || item.symbol, item.symbol));
+      select.add(new Option(item.display_name, item.symbol));
     });
 
-    const stillAvailable = state.symbols.find((item) => item.symbol === previous);
-    const preferred =
-      stillAvailable ||
-      state.symbols.find((item) => /volatility 100/i.test(item.display_name || "")) ||
-      state.symbols.find((item) => /volatility 75/i.test(item.display_name || "")) ||
+    const preferred = state.symbols.find((item) => item.symbol === previous) ||
+      state.symbols.find((item) => /volatility 100/i.test(item.display_name)) ||
+      state.symbols.find((item) => /volatility 75/i.test(item.display_name)) ||
       state.symbols[0];
 
     select.value = preferred.symbol;
+    $("marketCount").textContent = `${state.symbols.length} markets available`;
+    clearError();
     chooseSymbol(preferred.symbol);
-    $("marketCount").textContent = `${state.symbols.length} synthetic markets available`;
   }
 
   function forgetCurrentSubscription() {
@@ -171,13 +197,14 @@
   }
 
   function chooseSymbol(symbol) {
-    if (!symbol || !state.ws || state.ws.readyState !== WebSocket.OPEN) {
-      if (symbol) $("sampleNote").textContent = "Waiting for Deriv connection…";
+    if (!symbol) return;
+    state.currentSymbol = symbol;
+    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+      $("sampleNote").textContent = "Waiting for Deriv connection…";
       return;
     }
 
     forgetCurrentSubscription();
-    state.currentSymbol = symbol;
     state.ticks = [];
     state.evalHits = 0;
     state.evalCount = 0;
@@ -192,19 +219,21 @@
     $("marketLabel").textContent = $("symbolSelect").selectedOptions[0]?.text || symbol;
     renderEmpty();
 
-    send({
+    const historySent = send({
       ticks_history: symbol,
       count: Number($("windowSelect").value),
       end: "latest",
       style: "ticks",
       req_id: state.historyRequestId
     });
-
-    send({ ticks: symbol, subscribe: 1, req_id: nextRequestId() });
+    const ticksSent = send({ ticks: symbol, subscribe: 1, req_id: nextRequestId() });
+    if (!historySent || !ticksSent) {
+      showError("The market was selected, but its data request could not be sent. Reconnecting…");
+    }
   }
 
   function getDigit(quote, precision) {
-    const places = Math.max(0, Math.min(10, numberOf(precision, 2)));
+    const places = precisionOf(precision, 2);
     const fixed = numberOf(quote).toFixed(places);
     const last = fixed.replace(".", "").replace("-", "").slice(-1);
     return /^\d$/.test(last) ? Number(last) : null;
@@ -230,27 +259,21 @@
 
   function handleHistory(data) {
     if (!data.history || !Array.isArray(data.history.prices)) return;
-    if (data.echo_req && data.echo_req.ticks_history &&
+    if (data.echo_req?.ticks_history &&
         data.echo_req.ticks_history !== state.currentSymbol) return;
 
-    state.pipSize = numberOf(data.pip_size ?? data.history.pip_size, state.pipSize);
+    state.pipSize = precisionOf(data.pip_size ?? data.history.pip_size, state.pipSize);
     const historical = data.history.prices.map((price, index) =>
       makeTick(price, data.history.times?.[index], state.pipSize)
     ).filter(Boolean);
 
-    // Keep live ticks that may have arrived while the history request was in flight.
     state.ticks = sortedUniqueTicks([...historical, ...state.ticks])
       .slice(-Math.max(1000, Number($("windowSelect").value)));
-
     evaluateHistory(state.ticks);
     render();
 
-    const count = state.ticks.length;
-    $("sampleNote").textContent = `${count.toLocaleString()} historical ticks loaded`;
-    if (state.ticks.length) {
-      const latest = state.ticks[state.ticks.length - 1];
-      updateLatest(latest);
-    }
+    $("sampleNote").textContent = `${state.ticks.length.toLocaleString()} historical ticks loaded`;
+    if (state.ticks.length) updateLatest(state.ticks[state.ticks.length - 1]);
   }
 
   function evaluateHistory(items) {
@@ -274,11 +297,12 @@
     return counts.indexOf(Math.max(...counts));
   }
 
-  function handleTick(tick, subscription) {
-    if (!tick || tick.symbol !== state.currentSymbol) return;
-    if (subscription && subscription.id) state.tickSubscriptionId = subscription.id;
+  function handleTick(tick, subscription, echoReq) {
+    const symbol = tick?.symbol || echoReq?.ticks;
+    if (!tick || (symbol && symbol !== state.currentSymbol)) return;
+    if (subscription?.id) state.tickSubscriptionId = subscription.id;
 
-    state.pipSize = numberOf(tick.pip_size, state.pipSize);
+    state.pipSize = precisionOf(tick.pip_size, state.pipSize);
     const item = makeTick(tick.quote, tick.epoch, state.pipSize);
     if (!item) return;
 
@@ -287,7 +311,6 @@
       if (last && last.quote === item.quote) return;
     }
 
-    // Score a simple rolling-frequency baseline before adding the new observation.
     if (state.ticks.length >= 30) {
       const predicted = predictFromRecent(state.ticks);
       state.evalCount += 1;
@@ -298,7 +321,6 @@
     state.ticks = sortedUniqueTicks(state.ticks)
       .slice(-Math.max(1000, Number($("windowSelect").value)));
     state.lastTickEpoch = item.epoch || state.lastTickEpoch;
-
     updateLatest(item);
     render();
     $("sampleNote").textContent = `${state.ticks.length.toLocaleString()} ticks in memory · live updates`;
@@ -329,10 +351,7 @@
 
   function render() {
     const sample = state.ticks.slice(-Number($("windowSelect").value));
-    if (!sample.length) {
-      renderEmpty();
-      return;
-    }
+    if (!sample.length) { renderEmpty(); return; }
 
     const counts = Array(10).fill(0);
     sample.forEach((item) => { counts[item.digit] += 1; });
@@ -373,7 +392,8 @@
       .map((item) => `${item.digit} (${pct(item.count, sample.length)})`).join(" · ");
 
     $("tickCount").textContent = sample.length.toLocaleString();
-    $("windowLabel").textContent = `${$("symbolSelect").selectedOptions[0]?.text || state.currentSymbol}`;
+    $("windowLabel").textContent =
+      $("symbolSelect").selectedOptions[0]?.text || state.currentSymbol;
     $("accuracy").textContent = state.evalCount
       ? `${pct(state.evalHits, state.evalCount)} · ${state.evalCount.toLocaleString()} test ticks`
       : "Collecting out-of-sample ticks";
@@ -384,13 +404,13 @@
     for (let digit = 0; digit <= 9; digit += 1) {
       $("matchDigit").add(new Option(String(digit), String(digit)));
     }
-
     $("symbolSelect").addEventListener("change", (event) => chooseSymbol(event.target.value));
     $("windowSelect").addEventListener("change", () => {
       if (state.currentSymbol) chooseSymbol(state.currentSymbol);
     });
     $("refreshBtn").addEventListener("click", () => {
       if (state.currentSymbol) chooseSymbol(state.currentSymbol);
+      else requestSymbols();
     });
     $("barrierSelect").addEventListener("change", render);
     $("matchDigit").addEventListener("change", render);
