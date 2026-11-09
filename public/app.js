@@ -59,7 +59,6 @@
     state.symbolsRequestId = nextRequestId();
     if (!send({
       active_symbols: "brief",
-      product_type: "basic",
       req_id: state.symbolsRequestId
     })) {
       state.symbolsRequestId = null;
