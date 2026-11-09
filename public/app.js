@@ -215,7 +215,8 @@
     $("latestTime").textContent = "Waiting for first tick";
     $("sampleNote").textContent = "Loading historical ticks…";
     $("digitBars").replaceChildren();
-    $("marketLabel").textContent = $("symbolSelect").selectedOptions[0]?.text || symbol;
+    const marketLabel = $("marketLabel");
+if (marketLabel) marketLabel.textContent = $("symbolSelect").selectedOptions[0]?.text || symbol;
     renderEmpty();
 
     const historySent = send({
