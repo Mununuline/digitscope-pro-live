@@ -243,7 +243,7 @@
   function render() {
     const signals = latestRows
       .flatMap(buildSignals)
-      .sort((a,b)=>b.z-a.z);
+      .sort((a,b)=>Math.abs(b.z)-Math.abs(a.z));
 
     const ready = latestRows.filter(r=>r.n>=MIN_SAMPLE).length;
     $("diStatus").textContent =
@@ -251,7 +251,7 @@
 
     const visible = $("diFilter").value === "all"
       ? signals
-      : signals.filter(s=>s.z>=WATCH_Z);
+      signals.filter(s=>Math.abs(s.z)>=WATCH_Z)
 
     if (!visible.length) {
       $("diRows").innerHTML =
@@ -260,11 +260,11 @@
     }
 
     $("diRows").innerHTML = visible.slice(0,30).map((s,i)=>{
-      const strong = s.z>=STRONG_Z;
-      const watch = s.z>=WATCH_Z;
-      const label = strong ? "Strong deviation" : watch ? "Watch" : "Weak";
-      const cls = strong ? "strong" : watch ? "watch" : "weak";
-
+      const strength = Math.abs(s.z);
+const strong = strength >= STRONG_Z;
+const watch = strength >= WATCH_Z;
+const direction = s.z >= 0 ? "Above baseline" : "Below baseline";
+const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " + direction;
       return `<tr>
         <td>${i+1}</td>
         <td>${escapeText(s.market)}<small>${escapeText(s.symbol)}</small></td>
