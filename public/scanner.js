@@ -179,7 +179,7 @@
         ? counts.reduce((sum,count) => sum + Math.pow(count - expected, 2) / Math.max(expected, 0.001), 0)
         : null;
       return {
-        ...market, n, last: n ? ticks[n-1].digit : "—",
+        ...market, n, counts: counts.slice(), last: n ? ticks[n-1].digit : "—",
         hot: n ? ranked[0].digit : "—",
         cold: n ? ranked[9].digit : "—",
         score
@@ -208,6 +208,16 @@
         <td>${row.score === null ? "Need " + (MIN_SAMPLE-row.n) + " ticks" : "Ranked"}</td>
       </tr>
     `).join("");
+    window.dispatchEvent(new CustomEvent("dsp:market-snapshot", {
+  detail: {
+    rows: rows.map(row => ({
+      symbol: row.symbol,
+      name: row.name,
+      n: row.n,
+      counts: row.counts.slice()
+    }))
+  }
+}));
   }
 
   installPanel();
