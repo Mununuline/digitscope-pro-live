@@ -4,7 +4,7 @@
   window.__digitScopeScannerLoaded = true;
 
   const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
-  const MAX_TICKS = 250;
+  const MAX_TICKS = 500;
   const MIN_SAMPLE = 100;
   let ws = null;
   let markets = [];
