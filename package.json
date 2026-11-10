@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js"
+    "check": "node --check server.js && node --check public/app.js && node --check public/scanner.js && node --check public/intelligence.js"
   },
   "dependencies": {
     "express": "^4.21.2"
