@@ -214,7 +214,12 @@
       symbol: row.symbol,
       name: row.name,
       n: row.n,
-      counts: row.counts.slice()
+      counts: row.counts.slice(),
+ticks: (samples[row.symbol] || []).slice(-MAX_TICKS).map(tick => ({
+  digit: tick.digit,
+  quote: tick.quote,
+  epoch: tick.epoch
+}))
     }))
   }
 }));
