@@ -6,7 +6,7 @@
   const state = {
     ws: null, symbols: [], ticks: [], currentSymbol: "", pipSize: 2,
     reconnectTimer: null, intentionalClose: false, requestId: 10,
-    historyRequestId: null, tickSubscriptionId: null, evalHits: 0,
+    historyRequestId: null, tickSubscriptionId: null, lastTickId: null, evalHits: 0,
     evalCount: 0, lastTickEpoch: null, connectAttempts: 0,
     symbolsRequestId: null
   };
@@ -208,6 +208,7 @@
     state.evalHits = 0;
     state.evalCount = 0;
     state.lastTickEpoch = null;
+    state.lastTickId = null;
     state.historyRequestId = nextRequestId();
 
     $("latestQuote").textContent = "—";
@@ -244,17 +245,17 @@ if (marketLabel) marketLabel.textContent = $("symbolSelect").selectedOptions[0]?
     if (!Number.isFinite(value)) return null;
     const digit = getDigit(value, precision);
     if (digit === null) return null;
-    return { quote: value, epoch: numberOf(epoch, 0), digit };
+    return { quote: value, epoch: numberOf(epoch, 0), digit, id: null };
   }
 
+  // Preserve every observation: multiple legitimate ticks can share the same
+  // second and quote. Timestamp/quote pairs are not unique tick identifiers.
   function sortedUniqueTicks(items) {
-    const byKey = new Map();
-    items.forEach((item) => {
-      if (!item) return;
-      const key = item.epoch ? `${item.epoch}:${item.quote}` : `noepoch:${item.quote}`;
-      byKey.set(key, item);
-    });
-    return Array.from(byKey.values()).sort((a, b) => a.epoch - b.epoch);
+    return items
+      .map((item, index) => ({ item, index }))
+      .filter(entry => entry.item)
+      .sort((a, b) => a.item.epoch - b.item.epoch || a.index - b.index)
+      .map(entry => entry.item);
   }
 
   function handleHistory(data) {
@@ -305,11 +306,12 @@ if (marketLabel) marketLabel.textContent = $("symbolSelect").selectedOptions[0]?
     state.pipSize = precisionOf(tick.pip_size, state.pipSize);
     const item = makeTick(tick.quote, tick.epoch, state.pipSize);
     if (!item) return;
+    item.id = tick.id == null ? null : String(tick.id);
 
-    if (item.epoch && state.lastTickEpoch && item.epoch === state.lastTickEpoch) {
-      const last = state.ticks[state.ticks.length - 1];
-      if (last && last.quote === item.quote) return;
-    }
+    // Deriv tick IDs identify a repeated delivery. Fall back to preserving
+    // the event when no ID is supplied; epoch/quote pairs can legitimately repeat.
+    if (item.id && item.id === state.lastTickId) return;
+    if (item.id) state.lastTickId = item.id;
 
     if (state.ticks.length >= 30) {
       const predicted = predictFromRecent(state.ticks);
