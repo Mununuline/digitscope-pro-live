@@ -249,9 +249,7 @@
     $("diStatus").textContent =
       ready+"/"+latestRows.length+" markets have at least "+MIN_SAMPLE+" ticks";
 
-    const visible = $("diFilter").value === "all"
-      ? signals
-      signals.filter(s=>Math.abs(s.z)>=WATCH_Z)
+    const visible = $("diFilter").value === "all" ? signals : signals.filter(s=>Math.abs(s.z)>=WATCH_Z);
 
     if (!visible.length) {
       $("diRows").innerHTML =
@@ -265,6 +263,7 @@ const strong = strength >= STRONG_Z;
 const watch = strength >= WATCH_Z;
 const direction = s.z >= 0 ? "Above baseline" : "Below baseline";
 const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " + direction;
+      const cls = strong ? "strong" : watch ? "watch" : "weak";
       return `<tr>
         <td>${i+1}</td>
         <td>${escapeText(s.market)}<small>${escapeText(s.symbol)}</small></td>
