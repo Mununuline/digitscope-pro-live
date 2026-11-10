@@ -154,8 +154,10 @@
     const epoch = Number(tick.epoch) || 0;
     const quote = Number(tick.quote);
     const previous = list[list.length - 1];
-    if (previous && previous.epoch === epoch && previous.quote === quote) return;
-    list.push({ digit: Number(last), epoch, quote });
+    const tickId = tick.id == null ? null : String(tick.id);
+    if (tickId && previous?.id === tickId) return;
+    // Do not deduplicate by epoch/quote: distinct ticks may share both values.
+    list.push({ digit: Number(last), epoch, quote, id: tickId });
     if (list.length > MAX_TICKS) list.shift();
 
     if (!renderTimer) {
