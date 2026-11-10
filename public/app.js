@@ -262,6 +262,9 @@ if (marketLabel) marketLabel.textContent = $("symbolSelect").selectedOptions[0]?
     if (!data.history || !Array.isArray(data.history.prices)) return;
     if (data.echo_req?.ticks_history &&
         data.echo_req.ticks_history !== state.currentSymbol) return;
+    if (data.echo_req?.req_id != null && state.historyRequestId != null &&
+        Number(data.echo_req.req_id) !== state.historyRequestId) return;
+    state.historyRequestId = null;
 
     state.pipSize = precisionOf(data.pip_size ?? data.history.pip_size, state.pipSize);
     const historical = data.history.prices.map((price, index) =>
