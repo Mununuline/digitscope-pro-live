@@ -189,6 +189,18 @@
     totalTicksBySymbol[symbol] = (totalTicksBySymbol[symbol] || 0) + 1;
     if (list.length > MAX_TICKS) list.shift();
 
+    const marketInfo = markets.find(item => item.symbol === symbol);
+    window.dispatchEvent(new CustomEvent("dsp:tick-observation", {
+      detail: {
+        symbol,
+        name: marketInfo ? marketInfo.name : symbol,
+        digit: Number(last),
+        quote,
+        epoch,
+        totalTicks: totalTicksBySymbol[symbol]
+      }
+    }));
+
     if (!renderTimer) {
       renderTimer = setTimeout(() => {
         renderTimer = null;
