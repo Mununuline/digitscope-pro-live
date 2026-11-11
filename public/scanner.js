@@ -4,12 +4,12 @@
   window.__digitScopeScannerLoaded = true;
 
   const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
-  const MAX_TICKS = 250;
-  const MIN_SAMPLE = 100;
+  const MAX_TICKS = 1000;
+  const MIN_SAMPLE = 300;
   let ws = null;
   let markets = [];
   let samples = Object.create(null);
-  let subscriptionId = null;
+  let subscriptionIds = new Set();
   let reconnectTimer = null;
   let renderTimer = null;
   let requestId = 700;
@@ -116,33 +116,34 @@
           return;
         }
 
-        status("Found " + markets.length + " Volatility markets. Starting one combined live subscription…", true);
-        ws.send(JSON.stringify({
-          ticks: markets.map(item => item.symbol),
-          subscribe: 1,
-          req_id: nextId()
-        }));
+        status("Found " + markets.length + " Volatility markets. Subscribing to each market…", true);
+        // Subscribe separately so ticks without tick.symbol can be routed by echo_req.ticks.
+        markets.forEach(item => {
+          ws.send(JSON.stringify({ ticks: item.symbol, subscribe: 1, req_id: nextId() }));
+        });
         return;
       }
 
       if (data.msg_type === "tick" || data.tick) {
-        receiveTick(data.tick, data.subscription);
+        receiveTick(data.tick, data.subscription, data.echo_req);
       }
     };
 
     ws.onerror = () => status("Scanner connection error. Retrying…");
     ws.onclose = () => {
-      subscriptionId = null;
+      subscriptionIds.clear();
       status("Scanner disconnected. Reconnecting…");
       reconnectTimer = setTimeout(openConnection, 3000);
     };
   }
 
-  function receiveTick(tick, subscription) {
-    if (!tick || !tick.symbol || !Number.isFinite(Number(tick.quote))) return;
-    if (subscription && subscription.id) subscriptionId = subscription.id;
+  function receiveTick(tick, subscription, echoReq) {
+    if (!tick || !Number.isFinite(Number(tick.quote))) return;
+    if (subscription && subscription.id) subscriptionIds.add(subscription.id);
 
-    const symbol = String(tick.symbol);
+    const routedSymbol = tick.symbol || (typeof echoReq?.ticks === "string" ? echoReq.ticks : "");
+    if (!routedSymbol) return;
+    const symbol = String(routedSymbol);
     if (!markets.some(item => item.symbol === symbol)) return;
 
     const precision = Number.isInteger(Number(tick.pip_size)) ? Number(tick.pip_size) : 2;
@@ -192,9 +193,9 @@
 
     const qualified = rows.filter(row => row.score !== null).length;
     if (markets.length) {
-      status(subscriptionId
+      status(subscriptionIds.size
         ? "Live scanner running · " + qualified + "/" + rows.length + " markets ranked"
-        : "Receiving market list · waiting for first live ticks", !!subscriptionId);
+        : "Receiving market list · waiting for first live ticks", subscriptionIds.size > 0);
     }
 
     const tbody = document.getElementById("dspScannerRows");
