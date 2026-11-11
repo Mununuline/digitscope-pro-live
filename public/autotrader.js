@@ -32,7 +32,7 @@ const panel=document.createElement("section");panel.id="dspAutoTrader";panel.inn
 </div>
 <h3>Live market candidates</h3><div class="at-scroll"><table><thead><tr><th>Market</th><th>Ticks</th><th>Top digit</th><th>Even</th><th>Odd</th><th>Observed bias</th><th>Decision</th></tr></thead><tbody id="atRows"><tr><td colspan="7">Waiting for scanner data…</td></tr></tbody></table></div>
 <p class="at-note">Risk controls planned before demo execution: fixed-fractional sizing, no martingale, one open position maximum, 0.5% risk per trade, 3% daily loss stop and a three-loss pause. Controls will be enforced server-side before orders are enabled.</p>
-<p class="at-note">Historical deviations are not proof of predictive edge. This preview does not submit proposals or buy contracts. We will first record forward predictions and compare them with actual outcomes and contract payout economics.</p>`;
+<p class="at-note">Historical deviations are not proof of predictive edge. The three-tick score counts a forecast as a hit if its selected digit appears at least once in the next three ticks; under independent uniform digits, a fixed digit has a 27.1% chance of appearing in that window. This preview does not submit proposals or buy contracts. We must beat the appropriate baseline out of sample and account for actual contract payouts before considering execution.</p>`;
 const hero=document.querySelector(".hero");if(hero)hero.insertAdjacentElement("afterend",panel);else document.body.prepend(panel);
 const $=id=>document.getElementById(id);let tradingSocket=null;const forecastState=new Map();let forecastHits=0,forecastSettled=0;
 function authStatus(msg,good=false){$("atAuthStatus").textContent=msg;$("atAuthStatus").className="at-status "+(good?"at-safe":"");}
