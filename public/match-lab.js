@@ -5,7 +5,7 @@
   window.__dspMatchLabLoaded = true;
 
   const HORIZON = 3;
-  const MAX_SAMPLE = 250;
+  const MAX_SAMPLE = 1000;
   let rows = [];
   let selectedSymbol = "";
 
