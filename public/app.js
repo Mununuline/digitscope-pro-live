@@ -6,7 +6,7 @@
   const state = {
     ws: null, symbols: [], ticks: [], currentSymbol: "", pipSize: 2,
     reconnectTimer: null, intentionalClose: false, requestId: 10,
-    historyRequestId: null, tickSubscriptionId: null, lastTickId: null, evalHits: 0,
+    historyRequestId: null, tickSubscriptionId: null, evalHits: 0,
     evalCount: 0, lastTickEpoch: null, connectAttempts: 0,
     symbolsRequestId: null
   };
@@ -208,7 +208,6 @@
     state.evalHits = 0;
     state.evalCount = 0;
     state.lastTickEpoch = null;
-    state.lastTickId = null;
     state.historyRequestId = nextRequestId();
 
     $("latestQuote").textContent = "—";
@@ -309,13 +308,8 @@ if (marketLabel) marketLabel.textContent = $("symbolSelect").selectedOptions[0]?
     state.pipSize = precisionOf(tick.pip_size, state.pipSize);
     const item = makeTick(tick.quote, tick.epoch, state.pipSize);
     if (!item) return;
-    item.id = tick.id == null ? null : String(tick.id);
-
-    // Deriv tick IDs identify a repeated delivery. Fall back to preserving
-    // the event when no ID is supplied; epoch/quote pairs can legitimately repeat.
-    if (item.id && item.id === state.lastTickId) return;
-    if (item.id) state.lastTickId = item.id;
-
+    // Deriv tick.id may identify the subscription stream rather than a unique
+    // observation. Never use it to discard subsequent legitimate tick updates.
     if (state.ticks.length >= 30) {
       const predicted = predictFromRecent(state.ticks);
       state.evalCount += 1;
