@@ -10,6 +10,7 @@
   let markets = [];
   let samples = Object.create(null);
   const subscriptionIds = Object.create(null);
+  const symbolsBySubscriptionId = Object.create(null);
   let reconnectTimer = null;
   let renderTimer = null;
   let requestId = 700;
@@ -137,6 +138,7 @@
     ws.onerror = () => status("Scanner connection error. Retrying…");
     ws.onclose = () => {
       Object.keys(subscriptionIds).forEach(key => delete subscriptionIds[key]);
+      Object.keys(symbolsBySubscriptionId).forEach(key => delete symbolsBySubscriptionId[key]);
       status("Scanner disconnected. Reconnecting…");
       reconnectTimer = setTimeout(openConnection, 3000);
     };
@@ -145,9 +147,20 @@
   function receiveTick(tick, subscription, echoReq) {
     if (!tick || !Number.isFinite(Number(tick.quote))) return;
     const echoedSymbol = typeof echoReq?.ticks === "string" ? echoReq.ticks : "";
-    const symbol = String(tick.symbol || echoedSymbol);
+    const subscriptionId = subscription?.id == null ? "" : String(subscription.id);
+    // Some streaming updates omit tick.symbol and echo_req.ticks. Resolve those
+    // updates through the subscription ID learned from the initial response.
+    const symbol = String(
+      tick.symbol ||
+      echoedSymbol ||
+      (subscriptionId ? symbolsBySubscriptionId[subscriptionId] : "") ||
+      ""
+    );
     if (!symbol) return;
-    if (subscription && subscription.id) subscriptionIds[symbol] = subscription.id;
+    if (subscriptionId) {
+      subscriptionIds[symbol] = subscriptionId;
+      symbolsBySubscriptionId[subscriptionId] = symbol;
+    }
     if (!markets.some(item => item.symbol === symbol)) return;
 
     const precision = Number.isInteger(Number(tick.pip_size)) ? Number(tick.pip_size) : 2;
