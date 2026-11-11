@@ -199,7 +199,7 @@
     if (markets.length) {
       status(Object.keys(subscriptionIds).length
         ? "Live scanner running · " + qualified + "/" + rows.length + " markets ranked"
-        : "Receiving market list · waiting for first live ticks", !!subscriptionId);
+        : "Receiving market list · waiting for first live ticks", Object.keys(subscriptionIds).length > 0);
     }
 
     const tbody = document.getElementById("dspScannerRows");
