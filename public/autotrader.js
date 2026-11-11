@@ -28,13 +28,13 @@ const panel=document.createElement("section");panel.id="dspAutoTrader";panel.inn
 <div id="atAuthStatus" class="at-status">Not connected. Your permanent token is sent to the server only to request a short-lived demo OTP; it is not stored.</div>
 <div class="at-cards">
 <div class="at-card"><small>Operating mode</small><strong>DEMO</strong></div><div class="at-card"><small>Execution</small><strong>Disabled</strong></div>
-<div class="at-card"><small>Markets observed</small><strong id="atMarkets">0</strong></div><div class="at-card"><small>Markets with sample</small><strong id="atSignals">0</strong></div>
+<div class="at-card"><small>Markets observed</small><strong id="atMarkets">0</strong></div><div class="at-card"><small>Markets with sample</small><strong id="atSignals">0</strong></div><div class="at-card"><small>3-tick forecast hit rate</small><strong id="atForecastRate">—</strong><small id="atForecastCount">0 settled</small></div>
 </div>
 <h3>Live market candidates</h3><div class="at-scroll"><table><thead><tr><th>Market</th><th>Ticks</th><th>Top digit</th><th>Even</th><th>Odd</th><th>Observed bias</th><th>Decision</th></tr></thead><tbody id="atRows"><tr><td colspan="7">Waiting for scanner data…</td></tr></tbody></table></div>
 <p class="at-note">Risk controls planned before demo execution: fixed-fractional sizing, no martingale, one open position maximum, 0.5% risk per trade, 3% daily loss stop and a three-loss pause. Controls will be enforced server-side before orders are enabled.</p>
 <p class="at-note">Historical deviations are not proof of predictive edge. This preview does not submit proposals or buy contracts. We will first record forward predictions and compare them with actual outcomes and contract payout economics.</p>`;
 const hero=document.querySelector(".hero");if(hero)hero.insertAdjacentElement("afterend",panel);else document.body.prepend(panel);
-const $=id=>document.getElementById(id);let tradingSocket=null;
+const $=id=>document.getElementById(id);let tradingSocket=null;const forecastState=new Map();let forecastHits=0,forecastSettled=0;
 function authStatus(msg,good=false){$("atAuthStatus").textContent=msg;$("atAuthStatus").className="at-status "+(good?"at-safe":"");}
 $("atConnect").addEventListener("click",async()=>{
 const token=$("atToken").value.trim(),appId=$("atAppId").value.trim(),accountId=$("atAccount").value.trim();
@@ -53,8 +53,31 @@ tradingSocket.onerror=()=>authStatus("Demo WebSocket connection failed. Check to
 }catch(error){authStatus(error.message)}finally{$("atConnect").disabled=false}
 });
 $("atDisconnect").addEventListener("click",async()=>{if(tradingSocket){tradingSocket.close();tradingSocket=null}await fetch("/api/autotrader/logout",{method:"POST"}).catch(()=>{});authStatus("Disconnected. Temporary server session cleared.");});
+function updateForecast(row){
+const state=forecastState.get(row.symbol)||{lastEpoch:0,pending:[]};
+const fresh=(row.recentTicks||[]).filter(t=>Number(t.epoch)>state.lastEpoch).sort((a,b)=>a.epoch-b.epoch);
+for(const tick of fresh){
+for(const item of state.pending){
+if(tick.digit===item.digit){item.hit=true;item.remaining=0;}
+else item.remaining-=1;
+}
+const settled=state.pending.filter(item=>item.hit||item.remaining<=0);
+settled.forEach(item=>{forecastSettled++;if(item.hit)forecastHits++;});
+state.pending=state.pending.filter(item=>!item.hit&&item.remaining>0);
+const counts=row.counts||[];
+if(counts.length===10&&row.n>=100){
+const max=Math.max(...counts),prediction=counts.indexOf(max);
+state.pending.push({digit:prediction,remaining:3});
+}
+state.lastEpoch=Number(tick.epoch)||state.lastEpoch;
+}
+forecastState.set(row.symbol,state);
+}
 window.addEventListener("dsp:market-snapshot",event=>{
-const rows=event.detail?.rows||[];$("atMarkets").textContent=String(rows.length);const ready=rows.filter(r=>r.n>=300);$("atSignals").textContent=String(ready.length);
+const rows=event.detail?.rows||[];rows.forEach(updateForecast);
+$("atMarkets").textContent=String(rows.length);const ready=rows.filter(r=>r.n>=300);$("atSignals").textContent=String(ready.length);
+$("atForecastRate").textContent=forecastSettled?(100*forecastHits/forecastSettled).toFixed(1)+"%":"—";
+$("atForecastCount").textContent=forecastSettled+" settled · "+forecastHits+" hits";
 const ranked=ready.map(r=>{const c=r.counts||[],n=r.n||0,even=c.reduce((s,v,d)=>s+(d%2===0?v:0),0),p=n?even/n:.5,top=c.indexOf(Math.max(...c));return {...r,p,top,bias:Math.abs(p-.5)};}).sort((a,b)=>b.bias-a.bias);
 $("atRows").innerHTML=ranked.slice(0,13).map(r=>{const bias=r.bias>=.03?(r.p>.5?"Even above baseline":"Odd above baseline"):"No material parity deviation";return `<tr><td>${String(r.name||r.symbol).replace(/[&<>"]/g,"")}</td><td>${r.n}</td><td>${r.top}</td><td>${(100*r.p).toFixed(1)}%</td><td>${(100*(1-r.p)).toFixed(1)}%</td><td>${bias}</td><td>Observe only</td></tr>`;}).join("")||'<tr><td colspan="7">No scanner samples received yet.</td></tr>';
 });
