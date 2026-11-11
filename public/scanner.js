@@ -4,7 +4,7 @@
   window.__digitScopeScannerLoaded = true;
 
   const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
-  const MAX_TICKS = 250;
+  const MAX_TICKS = 1000;
   const MIN_SAMPLE = 100;
   let ws = null;
   let markets = [];
@@ -61,7 +61,7 @@
           <tbody id="dspScannerRows"><tr><td colspan="8">Waiting for market list…</td></tr></tbody>
         </table>
       </div>
-      <p class="dsp-note">Ranking uses the chi-square deviation of the latest 250 digits from an even 0–9 distribution. A higher score means a more uneven recent sample, not a prediction or proven trading edge. Markets enter the ranking after 100 live ticks.</p>
+      <p class="dsp-note">Ranking uses the chi-square deviation of the latest 1,000 digits from an even 0–9 distribution. A higher score means a more uneven recent sample, not a prediction or proven trading edge. Markets enter the ranking after 100 live ticks.</p>
     `;
     hero.insertAdjacentElement("afterend", panel);
   }
