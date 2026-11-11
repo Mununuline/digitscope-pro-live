@@ -85,6 +85,7 @@
   const $ = id => document.getElementById(id);
   const pct = value => (value * 100).toFixed(1) + "%";
   const signedPp = value => (value >= 0 ? "+" : "") + (value * 100).toFixed(1) + " pp";
+  const signedPercent = value => (value >= 0 ? "+" : "") + (value * 100).toFixed(1) + "%";
   const safe = value => String(value).replace(/[&<>"']/g, ch => ({
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   }[ch]));
@@ -214,7 +215,7 @@
         '<td>' + (item.volatility === null ? "Collecting" : item.volatility.toFixed(5) + '<small>' + item.volatilityTrend + '</small>') + '</td>' +
         '<td><b>' + best.contract.label + '</b></td><td>' + pct(best.p) + '</td><td>' + pct(best.contract.baseline) + '</td>' +
         '<td>' + record.tested.toLocaleString() + '</td><td class="' + (skill !== null && skill > 0 ? "dts-positive" : "dts-negative") + '">' +
-        (skill === null ? "Collecting" : signedPp(skill)) + '</td><td class="' + evidenceClass + '">' + evidence + '</td></tr>';
+        (skill === null ? "Collecting" : signedPercent(skill)) + '</td><td class="' + evidenceClass + '">' + evidence + '</td></tr>';
     });
     $("dtsRows").innerHTML = rows.length ? rows.join("") : '<tr><td colspan="8">Waiting for scanner markets…</td></tr>';
   }
