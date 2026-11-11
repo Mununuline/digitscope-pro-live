@@ -13,6 +13,7 @@
   const symbolsBySubscriptionId = Object.create(null);
   let reconnectTimer = null;
   let renderTimer = null;
+  let pingTimer = null;
   let requestId = 700;
 
   const nextId = () => ++requestId;
@@ -88,6 +89,13 @@
     }
 
     ws.onopen = () => {
+      // Keep the Deriv socket alive through mobile-network/proxy idle timeouts.
+      clearInterval(pingTimer);
+      pingTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ ping: 1, req_id: nextId() }));
+        }
+      }, 25000);
       status("Connected. Discovering all Volatility indices…", true);
       ws.send(JSON.stringify({ active_symbols: "brief", req_id: nextId() }));
     };
@@ -109,7 +117,8 @@
         })).filter(item => item.symbol);
 
         markets.sort((a,b) => a.name.localeCompare(b.name));
-        samples = Object.create(null);
+        // Keep the rolling samples if this is a reconnect. Clearing them here
+        // makes every short network interruption send all markets back to zero.
         draw();
 
         if (!markets.length) {
@@ -137,6 +146,8 @@
 
     ws.onerror = () => status("Scanner connection error. Retrying…");
     ws.onclose = () => {
+      clearInterval(pingTimer);
+      pingTimer = null;
       Object.keys(subscriptionIds).forEach(key => delete subscriptionIds[key]);
       Object.keys(symbolsBySubscriptionId).forEach(key => delete symbolsBySubscriptionId[key]);
       status("Scanner disconnected. Reconnecting…");
