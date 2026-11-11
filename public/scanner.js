@@ -11,6 +11,7 @@
   let samples = Object.create(null);
   const subscriptionIds = Object.create(null);
   const symbolsBySubscriptionId = Object.create(null);
+  const totalTicksBySymbol = Object.create(null);
   let reconnectTimer = null;
   let renderTimer = null;
   let pingTimer = null;
@@ -185,6 +186,7 @@
     // Deriv tick.id can identify the subscription stream, not a unique tick.
     // Do not use it to deduplicate: that would discard every update after the first.
     list.push({ digit: Number(last), epoch, quote });
+    totalTicksBySymbol[symbol] = (totalTicksBySymbol[symbol] || 0) + 1;
     if (list.length > MAX_TICKS) list.shift();
 
     if (!renderTimer) {
@@ -243,7 +245,9 @@
       symbol: row.symbol,
       name: row.name,
       n: row.n,
-      counts: row.counts.slice()
+      counts: row.counts.slice(),
+      digits: (samples[row.symbol] || []).map(tick => tick.digit),
+      totalTicks: totalTicksBySymbol[row.symbol] || 0
     }))
   }
 }));
