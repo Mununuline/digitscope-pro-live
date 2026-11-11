@@ -11,6 +11,8 @@
   let latestRows = [];
   const validationBySymbol = Object.create(null);
   const VALIDATION_LOOKBACK = 100;
+  const VALIDATION_HORIZON = 3;
+  let validationRenderCounter = 0;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -180,7 +182,7 @@
       <table><thead><tr><th>Market</th><th>Tested</th><th>Hits</th><th>Hit rate</th><th>vs 10% baseline</th><th>95% interval</th></tr></thead>
       <tbody id="dvRows"><tr><td colspan="6">Collecting a 100-tick starting window…</td></tr></tbody></table>
     </div>
-    <p class="dv-note">Method: after a 100-tick warm-up, each forecast selects the most frequent digit from the preceding 100 ticks, then scores only the next unseen live tick. Historical warm-up data is never counted as a test result. Results are session-only and reset when this page is refreshed. This simple benchmark is not a trade signal; repeated testing and multiple markets can produce misleading results.</p>
+    <p class="dv-note">Method: after a 100-tick warm-up, each forecast selects the most frequent digit from the preceding 100 ticks, then scores only the third subsequent live tick. Historical warm-up data is never counted as a test result. Results are session-only and reset when this page is refreshed. This simple benchmark is not a trade signal; repeated testing and multiple markets can produce misleading results.</p>
   `;
   panel.insertAdjacentElement("afterend", validationPanel);
 
@@ -323,6 +325,81 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
       </tr>`;
     }).join("");
   }
+
+
+  function validationWilson(hits, tested) {
+    if (!tested) return [0, 0];
+    const z = 1.96, p = hits / tested, z2 = z * z;
+    const den = 1 + z2 / tested;
+    const center = (p + z2 / (2 * tested)) / den;
+    const margin = z * Math.sqrt(p * (1-p) / tested + z2 / (4 * tested * tested)) / den;
+    return [Math.max(0, center - margin), Math.min(1, center + margin)];
+  }
+
+  function renderValidation() {
+    const records = Object.values(validationBySymbol);
+    const total = records.reduce((sum, record) => sum + record.tested, 0);
+    const hits = records.reduce((sum, record) => sum + record.hits, 0);
+    $("dvTrials").textContent = total.toLocaleString();
+    $("dvRate").textContent = total ? (100 * hits / total).toFixed(1) + "%" : "—";
+    $("dvStatus").textContent = records.length + " markets observed · " +
+      total.toLocaleString() + " third-tick outcomes scored · " +
+      (total >= 1000 ? "1,000-test milestone reached" : (1000 - total).toLocaleString() + " more tests to reach 1,000");
+    const rows = records
+      .filter(record => record.tested > 0)
+      .sort((a, b) => b.tested - a.tested)
+      .map(record => {
+        const rate = record.hits / record.tested;
+        const interval = validationWilson(record.hits, record.tested);
+        const delta = (rate - 0.1) * 100;
+        return "<tr><td>" + escapeText(record.name) + "<small>" + escapeText(record.symbol) + "</small></td>" +
+          "<td>" + record.tested.toLocaleString() + "</td><td>" + record.hits.toLocaleString() + "</td>" +
+          "<td>" + (100 * rate).toFixed(1) + "%</td><td>" + (delta >= 0 ? "+" : "") + delta.toFixed(1) + " pp</td>" +
+          "<td>" + (100 * interval[0]).toFixed(1) + "–" + (100 * interval[1]).toFixed(1) + "%</td></tr>";
+      });
+    $("dvRows").innerHTML = rows.length ? rows.join("") :
+      '<tr><td colspan="6">Collecting the first 100 live training ticks per market…</td></tr>';
+  }
+
+  function onValidationTick(event) {
+    const data = event.detail || {};
+    const symbol = String(data.symbol || "");
+    const digit = Number(data.digit);
+    if (!symbol || !Number.isInteger(digit) || digit < 0 || digit > 9) return;
+
+    const record = validationBySymbol[symbol] || (validationBySymbol[symbol] = {
+      symbol, name: String(data.name || symbol), seq: 0, digits: [], pending: [], tested: 0, hits: 0
+    });
+    record.name = String(data.name || record.name || symbol);
+    record.seq += 1;
+
+    const remaining = [];
+    for (const forecast of record.pending) {
+      if (forecast.dueAt > record.seq) {
+        remaining.push(forecast);
+      } else {
+        record.tested += 1;
+        if (digit === forecast.target) record.hits += 1;
+      }
+    }
+    record.pending = remaining;
+
+    if (record.digits.length >= VALIDATION_LOOKBACK) {
+      const counts = Array(10).fill(0);
+      record.digits.slice(-VALIDATION_LOOKBACK).forEach(value => { counts[value] += 1; });
+      const maxCount = Math.max(...counts);
+      const target = counts.indexOf(maxCount);
+      record.pending.push({ target, dueAt: record.seq + VALIDATION_HORIZON });
+    }
+
+    record.digits.push(digit);
+    if (record.digits.length > VALIDATION_LOOKBACK + VALIDATION_HORIZON + 2) record.digits.shift();
+
+    validationRenderCounter += 1;
+    if (validationRenderCounter % 5 === 0 || record.tested === 1) renderValidation();
+  }
+
+  window.addEventListener("dsp:tick-observation", onValidationTick);
 
   window.addEventListener("dsp:market-snapshot", event => {
     latestRows = event.detail?.rows || [];
