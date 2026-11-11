@@ -9,7 +9,7 @@
   let ws = null;
   let markets = [];
   let samples = Object.create(null);
-  let subscriptionId = null;
+  const subscriptionIds = Object.create(null);
   let reconnectTimer = null;
   let renderTimer = null;
   let requestId = 700;
@@ -117,32 +117,37 @@
         }
 
         status("Found " + markets.length + " Volatility markets. Starting one combined live subscription…", true);
-        ws.send(JSON.stringify({
-          ticks: markets.map(item => item.symbol),
-          subscribe: 1,
-          req_id: nextId()
-        }));
+        // Use one subscription per symbol. Deriv may omit tick.symbol from
+        // streamed responses, so echo_req.ticks provides an unambiguous fallback.
+        markets.forEach(item => {
+          ws.send(JSON.stringify({
+            ticks: item.symbol,
+            subscribe: 1,
+            req_id: nextId()
+          }));
+        });
         return;
       }
 
       if (data.msg_type === "tick" || data.tick) {
-        receiveTick(data.tick, data.subscription);
+        receiveTick(data.tick, data.subscription, data.echo_req);
       }
     };
 
     ws.onerror = () => status("Scanner connection error. Retrying…");
     ws.onclose = () => {
-      subscriptionId = null;
+      Object.keys(subscriptionIds).forEach(key => delete subscriptionIds[key]);
       status("Scanner disconnected. Reconnecting…");
       reconnectTimer = setTimeout(openConnection, 3000);
     };
   }
 
-  function receiveTick(tick, subscription) {
-    if (!tick || !tick.symbol || !Number.isFinite(Number(tick.quote))) return;
-    if (subscription && subscription.id) subscriptionId = subscription.id;
-
-    const symbol = String(tick.symbol);
+  function receiveTick(tick, subscription, echoReq) {
+    if (!tick || !Number.isFinite(Number(tick.quote))) return;
+    const echoedSymbol = typeof echoReq?.ticks === "string" ? echoReq.ticks : "";
+    const symbol = String(tick.symbol || echoedSymbol);
+    if (!symbol) return;
+    if (subscription && subscription.id) subscriptionIds[symbol] = subscription.id;
     if (!markets.some(item => item.symbol === symbol)) return;
 
     const precision = Number.isInteger(Number(tick.pip_size)) ? Number(tick.pip_size) : 2;
@@ -153,11 +158,9 @@
     const list = samples[symbol] || (samples[symbol] = []);
     const epoch = Number(tick.epoch) || 0;
     const quote = Number(tick.quote);
-    const previous = list[list.length - 1];
-    const tickId = tick.id == null ? null : String(tick.id);
-    if (tickId && previous?.id === tickId) return;
-    // Do not deduplicate by epoch/quote: distinct ticks may share both values.
-    list.push({ digit: Number(last), epoch, quote, id: tickId });
+    // Deriv tick.id can identify the subscription stream, not a unique tick.
+    // Do not use it to deduplicate: that would discard every update after the first.
+    list.push({ digit: Number(last), epoch, quote });
     if (list.length > MAX_TICKS) list.shift();
 
     if (!renderTimer) {
@@ -194,7 +197,7 @@
 
     const qualified = rows.filter(row => row.score !== null).length;
     if (markets.length) {
-      status(subscriptionId
+      status(Object.keys(subscriptionIds).length
         ? "Live scanner running · " + qualified + "/" + rows.length + " markets ranked"
         : "Receiving market list · waiting for first live ticks", !!subscriptionId);
     }
