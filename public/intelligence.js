@@ -9,6 +9,8 @@
   const WATCH_Z = 1.96;
   const STRONG_Z = 2.58;
   let latestRows = [];
+  const validationBySymbol = Object.create(null);
+  const VALIDATION_LOOKBACK = 100;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -71,6 +73,28 @@
     #dspIntelligence .strong { color: #67e0ad; }
     #dspIntelligence .watch { color: #f4b86a; }
     #dspIntelligence .weak { color: #91a4b9; }
+    #dspValidation {
+      margin: 14px 0;
+      padding: 20px;
+      background: #101d2d;
+      border: 1px solid #203249;
+      border-radius: 16px;
+      color: #eaf2fb;
+    }
+    #dspValidation h2 { font-size: 19px; margin: 0; }
+    #dspValidation .dv-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:14px 0; }
+    #dspValidation .dv-card { background:#0a1725; border:1px solid #203249; border-radius:10px; padding:12px; }
+    #dspValidation .dv-card span { display:block; color:#91a4b9; font-size:11px; }
+    #dspValidation .dv-card strong { display:block; font-size:21px; margin-top:4px; }
+    #dspValidation .dv-table-wrap { overflow-x:auto; }
+    #dspValidation table { width:100%; min-width:620px; border-collapse:collapse; font-size:12px; }
+    #dspValidation th,#dspValidation td { padding:9px 8px; border-bottom:1px solid #203249; text-align:left; white-space:nowrap; }
+    #dspValidation th { color:#91a4b9; font-size:10px; }
+    #dspValidation small { display:block; color:#91a4b9; }
+    #dspValidation .dv-note { color:#91a4b9; font-size:11px; margin-top:12px; }
+    #dspValidation .dv-positive { color:#67e0ad; }
+    #dspValidation .dv-negative { color:#f4b86a; }
+    @media(max-width:600px){#dspValidation{padding:15px}#dspValidation .dv-summary{grid-template-columns:1fr}}
     #dspIntelligence .di-note {
       color: #91a4b9;
       font-size: 11px;
@@ -139,6 +163,26 @@
   if (scanner) scanner.insertAdjacentElement("afterend", panel);
   else if (hero) hero.insertAdjacentElement("afterend", panel);
   else document.body.appendChild(panel);
+
+
+  const validationPanel = document.createElement("section");
+  validationPanel.id = "dspValidation";
+  validationPanel.innerHTML = `
+    <p class="di-kicker">OUT-OF-SAMPLE TRACKER</p>
+    <h2>Signal Validation &amp; Performance</h2>
+    <p id="dvStatus">Waiting for live ticks to begin validation…</p>
+    <div class="dv-summary">
+      <div class="dv-card"><span>Future ticks tested</span><strong id="dvTrials">0</strong></div>
+      <div class="dv-card"><span>Walk-forward hit rate</span><strong id="dvRate">—</strong></div>
+      <div class="dv-card"><span>Random-digit baseline</span><strong>10.0%</strong></div>
+    </div>
+    <div class="dv-table-wrap">
+      <table><thead><tr><th>Market</th><th>Tested</th><th>Hits</th><th>Hit rate</th><th>vs 10% baseline</th><th>95% interval</th></tr></thead>
+      <tbody id="dvRows"><tr><td colspan="6">Collecting a 100-tick starting window…</td></tr></tbody></table>
+    </div>
+    <p class="dv-note">Method: after a 100-tick warm-up, each forecast selects the most frequent digit from the preceding 100 ticks, then scores only the next unseen live tick. Historical warm-up data is never counted as a test result. Results are session-only and reset when this page is refreshed. This simple benchmark is not a trade signal; repeated testing and multiple markets can produce misleading results.</p>
+  `;
+  panel.insertAdjacentElement("afterend", validationPanel);
 
   const $ = id => document.getElementById(id);
 
