@@ -54,7 +54,8 @@ tradingSocket.onerror=()=>authStatus("Demo WebSocket connection failed. Check to
 });
 $("atDisconnect").addEventListener("click",async()=>{if(tradingSocket){tradingSocket.close();tradingSocket=null}await fetch("/api/autotrader/logout",{method:"POST"}).catch(()=>{});authStatus("Disconnected. Temporary server session cleared.");});
 function updateForecast(row){
-const state=forecastState.get(row.symbol)||{lastEpoch:0,pending:[]};
+let state=forecastState.get(row.symbol);
+if(!state){const recent=row.recentTicks||[];const last=recent.reduce((max,t)=>Math.max(max,Number(t.epoch)||0),0);forecastState.set(row.symbol,{lastEpoch:last,pending:[]});return;}
 const fresh=(row.recentTicks||[]).filter(t=>Number(t.epoch)>state.lastEpoch).sort((a,b)=>a.epoch-b.epoch);
 for(const tick of fresh){
 for(const item of state.pending){
