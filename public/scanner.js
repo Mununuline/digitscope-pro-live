@@ -58,7 +58,7 @@
           <tbody id="dspScannerRows"><tr><td colspan="8">Waiting for market list…</td></tr></tbody>
         </table>
       </div>
-      <p class="dsp-note">Ranking uses the chi-square deviation of the latest 250 digits from an even 0–9 distribution. A higher score means a more uneven recent sample, not a prediction or proven trading edge. Markets enter the ranking after 100 live ticks.</p>
+      <p class="dsp-note">Ranking uses the chi-square deviation of the latest 1,000 digits from an even 0–9 distribution. A higher score means a more uneven recent sample, not a prediction or proven trading edge. Markets enter the ranking after 300 live ticks.</p>
     `;
     hero.insertAdjacentElement("afterend", panel);
   }
@@ -215,7 +215,10 @@
       symbol: row.symbol,
       name: row.name,
       n: row.n,
-      counts: row.counts.slice()
+      counts: row.counts.slice(),
+      lastDigit: row.last,
+      lastEpoch: n ? ticks[n-1].epoch : 0,
+      recentTicks: ticks.slice(-5).map(tick => ({ digit: tick.digit, epoch: tick.epoch }))
     }))
   }
 }));
