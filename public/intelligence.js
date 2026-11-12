@@ -466,9 +466,10 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
     renderValidation();
   }
 
-  window.addEventListener("dsp:tick-observation", onValidationTick);
-  // Snapshot recovery also handles a missed listener / script startup race.
-  // Per-market totalTicks deduplication prevents double-counting tick events.
+  // Use scanner snapshots as the authoritative validation input. Each snapshot
+  // carries the ordered digit buffer and total tick sequence, allowing this
+  // tracker to recover every unseen tick without racing the separate tick event.
+  // This also keeps validation working when a browser misses individual events.
   window.addEventListener("dsp:market-snapshot", onValidationSnapshot);
 
   window.addEventListener("dsp:market-snapshot", event => {
