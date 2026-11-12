@@ -13,6 +13,8 @@
   const VALIDATION_LOOKBACK = 100;
   const VALIDATION_HORIZON = 3;
   let validationRenderCounter = 0;
+  let validationSnapshotCount = 0;
+  let validationSnapshotMarketCount = 0;
 
   const style = document.createElement("style");
   style.textContent = `
@@ -342,9 +344,12 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
     const hits = records.reduce((sum, record) => sum + record.hits, 0);
     $("dvTrials").textContent = total.toLocaleString();
     $("dvRate").textContent = total ? (100 * hits / total).toFixed(1) + "%" : "—";
-    $("dvStatus").textContent = records.length + " markets observed · " +
-      total.toLocaleString() + " third-tick outcomes scored · " +
-      (total >= 1000 ? "1,000-test milestone reached" : (1000 - total).toLocaleString() + " more tests to reach 1,000");
+    $("dvStatus").textContent = validationSnapshotCount === 0
+      ? "Waiting for scanner snapshots · no market-data events received yet"
+      : records.length + " markets observed · " +
+        total.toLocaleString() + " third-tick outcomes scored · " +
+        (total >= 1000 ? "1,000-test milestone reached" : (1000 - total).toLocaleString() + " more tests to reach 1,000") +
+        " · snapshots " + validationSnapshotCount + " / markets " + validationSnapshotMarketCount;
     const rows = records
       .filter(record => record.tested > 0)
       .sort((a, b) => b.tested - a.tested)
@@ -420,6 +425,8 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
 
   function onValidationSnapshot(event) {
     const rows = event.detail?.rows || [];
+    validationSnapshotCount += 1;
+    validationSnapshotMarketCount = rows.length;
     rows.forEach(row => {
       const symbol = String(row.symbol || "");
       const digits = Array.isArray(row.digits) ? row.digits.map(Number) : [];
