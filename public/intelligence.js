@@ -433,7 +433,12 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
       // Bootstrap from the latest 100 observations if this tracker started
       // after the scanner, e.g. after a script refresh or partial deployment.
       // These are training observations only and are never counted as tests.
-      if (record.lastTotalTicks === 0 && record.seq === 0) {
+      // A tick event can arrive before the first snapshot and create the
+      // record. If no forecasts have been scored or queued yet, still seed
+      // the training window from the snapshot's retained history. This avoids
+      // needlessly waiting for 100 new ticks after the tracker starts.
+      if (record.tested === 0 && record.pending.length === 0 &&
+          record.digits.length < VALIDATION_LOOKBACK) {
         record.digits = digits.slice(-VALIDATION_LOOKBACK);
         record.seq = totalTicks;
         record.lastTotalTicks = totalTicks;
