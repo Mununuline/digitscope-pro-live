@@ -89,13 +89,27 @@
       if (forecast.dueAt > record.seq) {
         stillPending.push(forecast);
       } else {
-        record.outcomes.push({
-          id: memory.nextId++,
-          target: forecast.target,
-          actual: digit,
-          hit: digit === forecast.target,
-          epoch: Number(epoch) || 0
-        });
+        const target = Number(forecast && forecast.target);
+        const actual = Number(digit);
+        // Only score a forecast when both digits are explicitly available.
+        // This prevents legacy/malformed pending entries from producing a
+        // hit/miss row with empty forecast and observed digit fields.
+        if (Number.isInteger(target) && target >= 0 && target <= 9 &&
+            Number.isInteger(actual) && actual >= 0 && actual <= 9) {
+          record.outcomes.push({
+            id: memory.nextId++,
+            target,
+            actual,
+            forecastDigit: target,
+            observedDigit: actual,
+            hit: actual === target,
+            epoch: Number(epoch) || 0,
+            outcomeVersion: 2
+          });
+          if (record.outcomes.length > MAX_OUTCOMES_PER_MARKET) {
+            record.outcomes.shift();
+          }
+        }
         if (record.outcomes.length > MAX_OUTCOMES_PER_MARKET) {
           record.outcomes.shift();
         }
@@ -235,10 +249,22 @@
 
   function exportOutcomesCsv() {
     const rows = [["market_name", "symbol", "global_trial_id", "forecast_digit", "observed_digit", "hit", "scored_at_utc", "reference_baseline"]];
+    let completeRows = 0;
+    let incompleteRows = 0;
+    let newestEpoch = 0;
     Object.values(memory.markets).forEach(record => {
       record.outcomes.forEach(outcome => {
-        const iso = Number(outcome.epoch) > 0 ? new Date(Number(outcome.epoch) * 1000).toISOString() : "";
-        rows.push([record.name, record.symbol, outcome.id, outcome.target, outcome.actual,
+        const target = Number.isInteger(outcome.target) ? outcome.target : outcome.forecastDigit;
+        const actual = Number.isInteger(outcome.actual) ? outcome.actual : outcome.observedDigit;
+        const complete = Number.isInteger(target) && target >= 0 && target <= 9 &&
+          Number.isInteger(actual) && actual >= 0 && actual <= 9;
+        if (complete) completeRows++;
+        else incompleteRows++;
+        const epoch = Number(outcome.epoch) || 0;
+        newestEpoch = Math.max(newestEpoch, epoch);
+        const iso = epoch > 0 ? new Date(epoch * 1000).toISOString() : "";
+        rows.push([record.name, record.symbol, outcome.id,
+          complete ? target : "", complete ? actual : "",
           outcome.hit ? 1 : 0, iso, BASELINE]);
       });
     });
@@ -251,13 +277,17 @@
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "digitscope-validation-trials-" + new Date().toISOString().replace(/[:.]/g, "-") + ".csv";
+    link.download = "digitscope-validation-trials-v2-" + new Date().toISOString().replace(/[:.]/g, "-") + ".csv";
     document.body.appendChild(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
+    const newestText = newestEpoch > 0 ? new Date(newestEpoch * 1000).toISOString() : "no timestamp";
     document.getElementById("drExportStatus").textContent =
-      (rows.length - 1).toLocaleString() + " scored trials exported. Older saved records may not include forecast/observed digits.";
+      (rows.length - 1).toLocaleString() + " trials exported · " +
+      completeRows.toLocaleString() + " with both digits · " +
+      incompleteRows.toLocaleString() + " legacy/incomplete · newest scored time: " + newestText + ". " +
+      "Rows without recorded digits are intentionally left blank; they cannot be reconstructed from hit/miss alone.";
   }
 
   function safe(value) {
