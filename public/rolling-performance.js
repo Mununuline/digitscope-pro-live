@@ -91,6 +91,8 @@
       } else {
         record.outcomes.push({
           id: memory.nextId++,
+          target: forecast.target,
+          actual: digit,
           hit: digit === forecast.target,
           epoch: Number(epoch) || 0
         });
@@ -224,6 +226,40 @@
     return (delta >= 0 ? "+" : "") + delta.toFixed(1) + " pp";
   }
 
+  function csvCell(value) {
+    let text = value === null || value === undefined ? "" : String(value);
+    // Neutralise spreadsheet formulas while retaining the original text.
+    if (/^[\s]*[=+@-]/.test(text)) text = "'" + text;
+    return '"' + text.replace(/"/g, '""') + '"';
+  }
+
+  function exportOutcomesCsv() {
+    const rows = [["market_name", "symbol", "global_trial_id", "forecast_digit", "observed_digit", "hit", "scored_at_utc", "reference_baseline"]];
+    Object.values(memory.markets).forEach(record => {
+      record.outcomes.forEach(outcome => {
+        const iso = Number(outcome.epoch) > 0 ? new Date(Number(outcome.epoch) * 1000).toISOString() : "";
+        rows.push([record.name, record.symbol, outcome.id, outcome.target, outcome.actual,
+          outcome.hit ? 1 : 0, iso, BASELINE]);
+      });
+    });
+    if (rows.length === 1) {
+      document.getElementById("drExportStatus").textContent = "No scored trials are available to export yet.";
+      return;
+    }
+    const csv = rows.map(row => row.map(csvCell).join(",")).join("\r\n");
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "digitscope-validation-trials-" + new Date().toISOString().replace(/[:.]/g, "-") + ".csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    document.getElementById("drExportStatus").textContent =
+      (rows.length - 1).toLocaleString() + " scored trials exported. Older saved records may not include forecast/observed digits.";
+  }
+
   function safe(value) {
     return String(value).replace(/[&<>"']/g, ch => ({
       "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -255,6 +291,10 @@
       </style>
       <p class="dr-kicker">PHASE 2 · ROLLING VALIDATION</p>
       <h2>Rolling Performance Tracker</h2>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:12px 0">
+        <button id="drExport" class="button" type="button">Export scored trials (CSV)</button>
+        <span id="drExportStatus" class="dr-note" role="status" aria-live="polite"></span>
+      </div>
       <p id="drStatus">Restoring saved validation history…</p>
       <div class="dr-summary">
         <div class="dr-card"><span>Last 100 scored outcomes</span><strong id="dr100">—</strong><small id="dr100Meta">Waiting for tests</small></div>
@@ -273,6 +313,7 @@
     const existing = document.getElementById("dspValidation");
     if (existing) existing.insertAdjacentElement("afterend", panel);
     else document.querySelector("main")?.appendChild(panel);
+    panel.querySelector("#drExport").addEventListener("click", exportOutcomesCsv);
   }
 
   function render() {
