@@ -46,7 +46,7 @@ function getSession(req, res, create = false) {
 }
 
 function base64url(buffer) {
-  return buffer.toString("base64").replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+  return buffer.toString("base64").replaceAll("=", "").replaceAll("+", "-").replaceAll("/", "_");
 }
 
 function noStore(res) {
