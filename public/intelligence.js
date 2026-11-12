@@ -361,16 +361,7 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
       '<tr><td colspan="6">Collecting the first 100 live training ticks per market…</td></tr>';
   }
 
-  function onValidationTick(event) {
-    const data = event.detail || {};
-    const symbol = String(data.symbol || "");
-    const digit = Number(data.digit);
-    if (!symbol || !Number.isInteger(digit) || digit < 0 || digit > 9) return;
-
-    const record = validationBySymbol[symbol] || (validationBySymbol[symbol] = {
-      symbol, name: String(data.name || symbol), seq: 0, digits: [], pending: [], tested: 0, hits: 0
-    });
-    record.name = String(data.name || record.name || symbol);
+  function applyValidationDigit(record, digit) {
     record.seq += 1;
 
     const remaining = [];
@@ -384,8 +375,8 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
     }
     record.pending = remaining;
 
-    // Include the just-observed tick in the training window. The forecast is
-    // made now, so dueAt = seq + 3 is exactly the third subsequent tick.
+    // The current observation is included in training. A forecast made now
+    // is scored only when the third subsequent observation arrives.
     record.digits.push(digit);
     if (record.digits.length > VALIDATION_LOOKBACK) record.digits.shift();
 
@@ -396,12 +387,84 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
       const target = counts.indexOf(maxCount);
       record.pending.push({ target, dueAt: record.seq + VALIDATION_HORIZON });
     }
-
     validationRenderCounter += 1;
+  }
+
+  function getValidationRecord(symbol, name) {
+    return validationBySymbol[symbol] || (validationBySymbol[symbol] = {
+      symbol, name: String(name || symbol), seq: 0, lastTotalTicks: 0,
+      digits: [], pending: [], tested: 0, hits: 0
+    });
+  }
+
+  function onValidationTick(event) {
+    const data = event.detail || {};
+    const symbol = String(data.symbol || "");
+    const digit = Number(data.digit);
+    if (!symbol || !Number.isInteger(digit) || digit < 0 || digit > 9) return;
+
+    const record = getValidationRecord(symbol, data.name);
+    record.name = String(data.name || record.name || symbol);
+    const totalTicks = Number(data.totalTicks);
+
+    // totalTicks is the scanner's per-market sequence number. Ignore a
+    // duplicate observation and leave gaps for the snapshot recovery path.
+    if (Number.isSafeInteger(totalTicks) && totalTicks > 0) {
+      if (totalTicks <= record.lastTotalTicks) return;
+      if (record.lastTotalTicks && totalTicks !== record.lastTotalTicks + 1) return;
+      record.lastTotalTicks = totalTicks;
+    }
+    applyValidationDigit(record, digit);
     if (validationRenderCounter % 5 === 0 || record.tested === 1) renderValidation();
   }
 
+  function onValidationSnapshot(event) {
+    const rows = event.detail?.rows || [];
+    rows.forEach(row => {
+      const symbol = String(row.symbol || "");
+      const digits = Array.isArray(row.digits) ? row.digits.map(Number) : [];
+      const totalTicks = Number(row.totalTicks);
+      if (!symbol || !Number.isSafeInteger(totalTicks) || totalTicks < 1 ||
+          !digits.length || digits.some(d => !Number.isInteger(d) || d < 0 || d > 9)) return;
+
+      const record = getValidationRecord(symbol, row.name);
+      record.name = String(row.name || record.name || symbol);
+
+      // Bootstrap from the latest 100 observations if this tracker started
+      // after the scanner, e.g. after a script refresh or partial deployment.
+      // These are training observations only and are never counted as tests.
+      if (record.lastTotalTicks === 0 && record.seq === 0) {
+        record.digits = digits.slice(-VALIDATION_LOOKBACK);
+        record.seq = totalTicks;
+        record.lastTotalTicks = totalTicks;
+        return;
+      }
+
+      const gap = totalTicks - record.lastTotalTicks;
+      if (gap <= 0) return;
+
+      // Snapshots carry the scanner's rolling digit buffer. Recover only the
+      // missing observations in order; if the gap exceeds retained history,
+      // restart the warm-up rather than inventing third-tick outcomes.
+      if (gap > digits.length) {
+        record.digits = digits.slice(-VALIDATION_LOOKBACK);
+        record.seq = totalTicks;
+        record.lastTotalTicks = totalTicks;
+        record.pending = [];
+        return;
+      }
+
+      const missingDigits = digits.slice(-gap);
+      missingDigits.forEach(digit => applyValidationDigit(record, digit));
+      record.lastTotalTicks = totalTicks;
+    });
+    renderValidation();
+  }
+
   window.addEventListener("dsp:tick-observation", onValidationTick);
+  // Snapshot recovery also handles a missed listener / script startup race.
+  // Per-market totalTicks deduplication prevents double-counting tick events.
+  window.addEventListener("dsp:market-snapshot", onValidationSnapshot);
 
   window.addEventListener("dsp:market-snapshot", event => {
     latestRows = event.detail?.rows || [];
