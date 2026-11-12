@@ -240,6 +240,21 @@
         : "Receiving market list · waiting for first live ticks", Object.keys(subscriptionIds).length > 0);
     }
 
+    // Publish the market data independently of whether the scanner table
+    // exists or can be rendered. Analytics modules consume this event.
+    window.dispatchEvent(new CustomEvent("dsp:market-snapshot", {
+      detail: {
+        rows: rows.map(row => ({
+          symbol: row.symbol,
+          name: row.name,
+          n: row.n,
+          counts: row.counts.slice(),
+          digits: (samples[row.symbol] || []).map(tick => tick.digit),
+          totalTicks: totalTicksBySymbol[row.symbol] || 0
+        }))
+      }
+    }));
+
     const tbody = document.getElementById("dspScannerRows");
     if (!tbody) return;
     tbody.innerHTML = rows.map((row,index) => `
@@ -251,18 +266,6 @@
         <td>${row.score === null ? "Need " + (MIN_SAMPLE-row.n) + " ticks" : "Ranked"}</td>
       </tr>
     `).join("");
-    window.dispatchEvent(new CustomEvent("dsp:market-snapshot", {
-  detail: {
-    rows: rows.map(row => ({
-      symbol: row.symbol,
-      name: row.name,
-      n: row.n,
-      counts: row.counts.slice(),
-      digits: (samples[row.symbol] || []).map(tick => tick.digit),
-      totalTicks: totalTicksBySymbol[row.symbol] || 0
-    }))
-  }
-}));
   }
 
   installPanel();
