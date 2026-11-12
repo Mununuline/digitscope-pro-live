@@ -384,16 +384,18 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
     }
     record.pending = remaining;
 
-    if (record.digits.length >= VALIDATION_LOOKBACK) {
+    // Include the just-observed tick in the training window. The forecast is
+    // made now, so dueAt = seq + 3 is exactly the third subsequent tick.
+    record.digits.push(digit);
+    if (record.digits.length > VALIDATION_LOOKBACK) record.digits.shift();
+
+    if (record.digits.length === VALIDATION_LOOKBACK) {
       const counts = Array(10).fill(0);
-      record.digits.slice(-VALIDATION_LOOKBACK).forEach(value => { counts[value] += 1; });
+      record.digits.forEach(value => { counts[value] += 1; });
       const maxCount = Math.max(...counts);
       const target = counts.indexOf(maxCount);
       record.pending.push({ target, dueAt: record.seq + VALIDATION_HORIZON });
     }
-
-    record.digits.push(digit);
-    if (record.digits.length > VALIDATION_LOOKBACK + VALIDATION_HORIZON + 2) record.digits.shift();
 
     validationRenderCounter += 1;
     if (validationRenderCounter % 5 === 0 || record.tested === 1) renderValidation();
