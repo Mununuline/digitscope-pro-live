@@ -23,11 +23,19 @@
       Object.keys(parsed.markets).forEach(symbol => {
         const item = parsed.markets[symbol];
         if (!item || !Array.isArray(item.outcomes)) return;
+        const outcomes = item.outcomes.filter(x => x && typeof x.hit === "boolean")
+          .slice(-MAX_OUTCOMES_PER_MARKET);
+        // Migrate pre-ID records in their stored per-market order. Their exact
+        // cross-market chronology cannot be recovered because older records
+        // did not persist a global sequence ID.
+        outcomes.forEach(outcome => {
+          if (!Number.isSafeInteger(outcome.id) || outcome.id < 1) outcome.id = memory.nextId++;
+          else memory.nextId = Math.max(memory.nextId, outcome.id + 1);
+        });
         memory.markets[symbol] = {
           symbol,
           name: String(item.name || symbol),
-          outcomes: item.outcomes.filter(x => x && typeof x.hit === "boolean")
-            .slice(-MAX_OUTCOMES_PER_MARKET),
+          outcomes,
           seq: Number(item.seq) || 0,
           lastTotalTicks: Number(item.lastTotalTicks) || 0,
           digits: Array.isArray(item.digits) ? item.digits.slice(-LOOKBACK) : [],
@@ -319,10 +327,112 @@
     });
     document.getElementById("drRows").innerHTML = rows.length ? rows.join("") :
       '<tr><td colspan="7">No scored outcomes yet. The 100-tick training window is excluded.</td></tr>';
+    adaptiveRender();
+  }
+
+
+  function installAdaptive() {
+    const panel = document.createElement("section");
+    panel.id = "dspAdaptiveIntelligence";
+    panel.innerHTML = `
+      <style>
+        #dspAdaptiveIntelligence{margin:14px 0;padding:20px;background:#101d2d;border:1px solid #203249;border-radius:16px;color:#eaf2fb}
+        #dspAdaptiveIntelligence h2{font-size:19px;margin:0}
+        #dspAdaptiveIntelligence .da-kicker{color:#52d6df;font-size:10px;letter-spacing:2px;font-weight:800}
+        #dspAdaptiveIntelligence .da-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0}
+        #dspAdaptiveIntelligence .da-card{background:#0a1725;border:1px solid #203249;border-radius:10px;padding:12px}
+        #dspAdaptiveIntelligence .da-card span{display:block;color:#91a4b9;font-size:11px}
+        #dspAdaptiveIntelligence .da-card strong{display:block;font-size:20px;margin-top:4px}
+        #dspAdaptiveIntelligence .da-wrap{overflow-x:auto}
+        #dspAdaptiveIntelligence table{width:100%;min-width:850px;border-collapse:collapse;font-size:12px}
+        #dspAdaptiveIntelligence th,#dspAdaptiveIntelligence td{padding:9px 8px;border-bottom:1px solid #203249;text-align:left;white-space:nowrap}
+        #dspAdaptiveIntelligence th{color:#91a4b9;font-size:10px}
+        #dspAdaptiveIntelligence small{display:block;color:#91a4b9}
+        #dspAdaptiveIntelligence .da-good{color:#67e0ad}
+        #dspAdaptiveIntelligence .da-watch{color:#f4b86a}
+        #dspAdaptiveIntelligence .da-muted{color:#91a4b9}
+        #dspAdaptiveIntelligence .da-note{color:#91a4b9;font-size:11px;line-height:1.5;margin-top:12px}
+        @media(max-width:650px){#dspAdaptiveIntelligence{padding:15px}#dspAdaptiveIntelligence .da-summary{grid-template-columns:1fr}}
+      </style>
+      <p class="da-kicker">PHASE 3 · ADAPTIVE MARKET INTELLIGENCE</p>
+      <h2>Market Evidence &amp; Holdout Validation</h2>
+      <p id="daStatus">Evaluating saved outcomes…</p>
+      <div class="da-summary">
+        <div class="da-card"><span>Markets evaluated</span><strong id="daMarkets">0</strong></div>
+        <div class="da-card"><span>Independent holdout passes</span><strong id="daPasses">0</strong></div>
+        <div class="da-card"><span>Deterioration watches</span><strong id="daAlerts">0</strong></div>
+      </div>
+      <div class="da-wrap"><table>
+        <thead><tr><th>Discovery rank</th><th>Market</th><th>Discovery sample</th><th>Discovery rate</th><th>Forward holdout</th><th>Holdout 95% interval</th><th>Classification</th><th>Monitor</th></tr></thead>
+        <tbody id="daRows"><tr><td colspan="8">Waiting for saved outcomes…</td></tr></tbody>
+      </table></div>
+      <p class="da-note">Method: each market's earlier 60% of retained scored outcomes is the discovery segment; its later 40% is a forward holdout. Markets are ranked using the discovery segment only. A holdout pass requires at least 100 holdout trials and a 95% Wilson lower bound above the 10% reference. “Strong candidate” requires both segments to clear that threshold. Fewer samples are labelled insufficient. A deterioration watch compares the latest 100 outcomes with the preceding 100. Legacy outcomes created before global IDs were introduced are migrated in stored per-market order; their exact cross-market chronology is unavailable. This is research monitoring, not a trade instruction or proof of a profitable edge.</p>
+    `;
+    const rolling = document.getElementById("dspRollingPerformance");
+    if (rolling) rolling.insertAdjacentElement("afterend", panel);
+    else document.querySelector("main")?.appendChild(panel);
+  }
+
+  function adaptiveStats(items) {
+    const n = items.length;
+    const hits = items.reduce((sum, x) => sum + (x.hit ? 1 : 0), 0);
+    return { n, hits, rate: n ? hits / n : null, interval: wilson(hits, n) };
+  }
+
+  function adaptiveRender() {
+    const records = Object.values(memory.markets).filter(r => r.outcomes.length);
+    const rows = records.map(record => {
+      const ordered = record.outcomes.slice().sort((a,b) => (a.id || 0) - (b.id || 0));
+      const split = Math.floor(ordered.length * 0.6);
+      const discovery = adaptiveStats(ordered.slice(0, split));
+      const holdoutItems = ordered.slice(split);
+      const holdout = adaptiveStats(holdoutItems);
+      const prior = adaptiveStats(ordered.slice(-200, -100));
+      const recent = adaptiveStats(ordered.slice(-100));
+      const enoughDiscovery = discovery.n >= 100;
+      const enoughHoldout = holdout.n >= 100;
+      const discoveryPass = enoughDiscovery && discovery.interval[0] > BASELINE;
+      const holdoutPass = enoughHoldout && holdout.interval[0] > BASELINE;
+      let classification = "Insufficient evidence";
+      let cls = "da-muted";
+      if (discoveryPass && holdoutPass) { classification = "Strong candidate · replicated"; cls = "da-good"; }
+      else if (enoughHoldout && holdout.interval[1] < BASELINE) { classification = "Weak · below reference"; cls = "da-watch"; }
+      else if (enoughDiscovery && enoughHoldout && recent.rate !== null && prior.rate !== null &&
+          recent.rate - prior.rate >= 0.03) { classification = "Improving · not confirmed"; cls = "da-good"; }
+      else if (enoughDiscovery && enoughHoldout) { classification = "Neutral · unconfirmed"; cls = "da-muted"; }
+      const deterioration = prior.n >= 50 && recent.n >= 50 &&
+        prior.rate - recent.rate >= 0.05;
+      const discoveryLower = discovery.interval ? discovery.interval[0] : -1;
+      const holdoutCI = holdout.interval
+        ? (100*holdout.interval[0]).toFixed(1) + "–" + (100*holdout.interval[1]).toFixed(1) + "%"
+        : "—";
+      return { record, discovery, holdout, discoveryLower, holdoutCI, classification, cls,
+        monitor: deterioration ? "Deterioration watch" : (prior.n >= 50 && recent.n >= 50 ? "No alert" : "Building trend") };
+    }).sort((a,b) => b.discoveryLower - a.discoveryLower);
+
+    const passes = rows.filter(r => r.discovery.n >= 100 && r.holdout.n >= 100 &&
+      r.discovery.interval[0] > BASELINE && r.holdout.interval[0] > BASELINE).length;
+    const alerts = rows.filter(r => r.monitor === "Deterioration watch").length;
+    document.getElementById("daMarkets").textContent = rows.length;
+    document.getElementById("daPasses").textContent = passes;
+    document.getElementById("daAlerts").textContent = alerts;
+    document.getElementById("daStatus").textContent =
+      "Discovery/holdout split is chronological within each market · 10.0% reference · " +
+      (storageAvailable ? "saved local history available" : "local storage unavailable");
+    document.getElementById("daRows").innerHTML = rows.length ? rows.map((r,i) => {
+      const rate = r.discovery.rate === null ? "—" : (100*r.discovery.rate).toFixed(1)+"%";
+      const monitorClass = r.monitor === "Deterioration watch" ? "da-watch" : "da-muted";
+      return "<tr><td>"+(i+1)+"</td><td>"+safe(r.record.name)+"<small>"+safe(r.record.symbol)+"</small></td>"+
+        "<td>"+r.discovery.n+"</td><td>"+rate+"</td><td>"+r.holdout.n+" trials · "+
+        (r.holdout.rate === null ? "—" : (100*r.holdout.rate).toFixed(1)+"%")+"</td>"+
+        "<td>"+r.holdoutCI+"</td><td class=\""+r.cls+"\">"+r.classification+"</td>"+
+        "<td class=\""+monitorClass+"\">"+r.monitor+"</td></tr>";
+    }).join("") : '<tr><td colspan="8">No saved scored outcomes yet.</td></tr>';
   }
 
   load();
   install();
+  installAdaptive();
   window.addEventListener("dsp:tick-observation", onTick);
   window.addEventListener("dsp:market-snapshot", onSnapshot);
   render();
