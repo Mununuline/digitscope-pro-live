@@ -169,9 +169,11 @@
     const item = getMarket(symbol, data.name || symbol);
     item.seq += 1;
     scoreDueForecasts(item, digit);
-    createForecasts(item);
+    // Include the just-observed tick in the 100-tick training window. Since
+    // the forecast is issued now, seq + 3 is the third subsequent tick.
     item.digits.push(digit);
     if (item.digits.length > HISTORY_LIMIT) item.digits.shift();
+    createForecasts(item);
     updateVolatility(item, quote);
     if (item.seq % 5 === 0) render();
   }
