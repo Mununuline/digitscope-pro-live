@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js && node --check public/scanner.js && node --check public/intelligence.js && node --check public/rolling-performance.js && node --check public/match-lab.js && node --check public/trade-scanner.js"
+    "check": "node --check server.js && node --check public/app.js && node --check public/scanner.js && node --check public/intelligence.js && node --check public/rolling-performance.js && node --check public/statistical-reliability.js && node --check public/match-lab.js && node --check public/trade-scanner.js"
   },
   "dependencies": {
     "express": "^4.21.2"
