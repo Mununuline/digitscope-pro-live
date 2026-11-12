@@ -10,7 +10,7 @@
   const MAX_OUTCOMES_PER_MARKET = 5000;
   const WINDOW_SIZES = [100, 250, 500];
 
-  const memory = { version: 1, markets: Object.create(null) };
+  const memory = { version: 1, nextId: 1, markets: Object.create(null) };
   let storageAvailable = true;
 
   function load() {
@@ -19,6 +19,7 @@
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (!parsed || parsed.version !== 1 || !parsed.markets) return;
+      memory.nextId = Number(parsed.nextId) || 1;
       Object.keys(parsed.markets).forEach(symbol => {
         const item = parsed.markets[symbol];
         if (!item || !Array.isArray(item.outcomes)) return;
@@ -54,7 +55,7 @@
           pending: r.pending
         };
       });
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, markets }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, nextId: memory.nextId, markets }));
     } catch (_) {
       storageAvailable = false;
     }
@@ -81,6 +82,7 @@
         stillPending.push(forecast);
       } else {
         record.outcomes.push({
+          id: memory.nextId++,
           hit: digit === forecast.target,
           epoch: Number(epoch) || 0
         });
@@ -196,7 +198,8 @@
   }
 
   function summary(records, limit) {
-    const outcomes = records.flatMap(record => record.outcomes);
+    const outcomes = records.flatMap(record => record.outcomes)
+      .sort((a, b) => (a.id || 0) - (b.id || 0));
     const sample = limit ? outcomes.slice(-limit) : outcomes;
     const hits = sample.reduce((sum, outcome) => sum + (outcome.hit ? 1 : 0), 0);
     const tested = sample.length;
