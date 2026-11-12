@@ -110,9 +110,6 @@
             record.outcomes.shift();
           }
         }
-        if (record.outcomes.length > MAX_OUTCOMES_PER_MARKET) {
-          record.outcomes.shift();
-        }
       }
     });
     record.pending = stillPending;
