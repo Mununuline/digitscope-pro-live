@@ -199,6 +199,7 @@
       if(!hasQuote)reasons.push("Enter the live total payout ÷ stake quote.");
       if(current.arr.length<MIN_TESTS)reasons.push("Need at least "+MIN_TESTS+" scored outcomes; currently "+current.arr.length+".");
       if(current.adj===null||current.adj>=0.05)reasons.push("The model has not passed Holm-adjusted significance against its fair reference.");
+      if(breakEven===null||current.p===null||current.p<=breakEven+0.02)reasons.push("The current estimated chance does not clear payout break-even by 2 percentage points.");
       if(!current.ci||breakEven===null||current.ci[0]<=breakEven+0.02)reasons.push("The 95% lower confidence bound does not clear payout break-even by 2 percentage points.");
       if(current.skill===null||current.skill<=0)reasons.push("Out-of-sample Brier skill is not positive.");
       const trade=reasons.length===0;
