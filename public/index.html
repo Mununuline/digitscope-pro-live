@@ -99,6 +99,25 @@
       </div>
     </section>
 
+
+    <section class="panel section" id="derivDemoPanel">
+      <div class="section-head">
+        <div><p class="eyebrow">PHASE 6 · SECURE ACCOUNT LINK</p><h2>Deriv Demo Account</h2></div>
+        <span class="tag">DEMO ONLY · READ-ONLY SETUP</span>
+      </div>
+      <p class="muted">Connect securely through Deriv OAuth. DigitScope Pro will list Demo accounts only; this setup does not place trades or request access to a real account.</p>
+      <div class="evaluation">
+        <div><span>Connection</span><strong id="derivDemoStatus">Not connected</strong></div>
+        <div><span>Demo accounts found</span><strong id="derivDemoCount">0</strong></div>
+      </div>
+      <div id="derivDemoAccounts" class="top-digits">No Demo account connected.</div>
+      <div class="actions" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+        <button id="derivConnectBtn" class="button" type="button">Connect Deriv Demo</button>
+        <button id="derivDisconnectBtn" class="button" type="button" hidden>Disconnect</button>
+      </div>
+      <p id="derivDemoMessage" class="footnote" role="status">Your Deriv password and OAuth token are never shown in the dashboard. The session is held server-side and is cleared when the server restarts.</p>
+    </section>
+
     <footer>DigitScope Pro · Independent analytics tool · No trade execution · Probabilities are estimates, not financial advice.</footer>
     <div id="errorBox" class="error" role="alert" hidden></div>
   </main>
@@ -110,5 +129,6 @@
   <script src="match-lab.js"></script>
   <script src="match-decision.js"></script>
   <script src="trade-scanner.js"></script>
+  <script src="deriv-demo.js?v=20261112-oauth1"></script>
 </body>
 </html>
