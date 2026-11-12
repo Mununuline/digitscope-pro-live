@@ -344,8 +344,10 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
     const hits = records.reduce((sum, record) => sum + record.hits, 0);
     $("dvTrials").textContent = total.toLocaleString();
     $("dvRate").textContent = total ? (100 * hits / total).toFixed(1) + "%" : "—";
-    $("dvStatus").textContent = validationSnapshotCount === 0
-      ? "Waiting for scanner snapshots · no market-data events received yet"
+    $("dvStatus").textContent = records.length === 0
+      ? (validationSnapshotCount === 0
+          ? "Waiting for scanner tick events and snapshots · no market observations received yet"
+          : "Scanner snapshots received · waiting for valid tick observations")
       : records.length + " markets observed · " +
         total.toLocaleString() + " third-tick outcomes scored · " +
         (total >= 1000 ? "1,000-test milestone reached" : (1000 - total).toLocaleString() + " more tests to reach 1,000") +
@@ -477,6 +479,11 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
   // carries the ordered digit buffer and total tick sequence, allowing this
   // tracker to recover every unseen tick without racing the separate tick event.
   // This also keeps validation working when a browser misses individual events.
+  // Score individual tick events immediately. Sequence checks prevent duplicates;
+  // snapshots below recover events missed during browser pauses or interruptions.
+  window.addEventListener("dsp:tick-observation", onValidationTick);
+
+  // Snapshots carry the ordered digit buffer and total sequence for gap recovery.
   window.addEventListener("dsp:market-snapshot", onValidationSnapshot);
 
   window.addEventListener("dsp:market-snapshot", event => {
