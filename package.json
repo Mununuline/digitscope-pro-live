@@ -8,10 +8,11 @@
     "node": ">=18"
   },
   "scripts": {
-    "start": "node server.js",
-    "check": "node --check server.js && node --check public/app.js && node --check public/scanner.js && node --check public/intelligence.js && node --check public/rolling-performance.js && node --check public/statistical-reliability.js && node --check public/match-lab.js && node --check public/match-decision.js && node --check public/trade-scanner.js && node --check public/deriv-demo.js"
+    "start": "node build.js && node server.js",
+    "check": "node --check server.js && node --check build.js"
   },
   "dependencies": {
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "esbuild": "^0.25.0"
   }
 }
