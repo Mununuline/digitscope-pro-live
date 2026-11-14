@@ -378,3 +378,17 @@ test("every rolling-overlapping dataset design is blocked from independent-sampl
     assert.ok(result.reasons.some(reason=>reason.includes("Rolling-overlapping")),dataset_id);
   });
 });
+
+
+test("every-third-tick samples reject repeated target ticks within either partition", () => {
+  const make = (origin,target) => ({
+    dataset_id:"DS-07",methodology_version:"1.0.0",market:"R_100",contract:"DIGIT_MATCH",
+    model_id:"rolling-most-frequent-v1",selected_digit:4,tick_identity_version:"session-v1",
+    forecast_origin_tick_id:"R_100:session-a:"+origin,target_tick_id:"R_100:session-a:"+target,
+    training_window:100,forecast_horizon:3,observed_digit:4,hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"
+  });
+  const result=registry.compareSamples([make(10,13),make(13,16),make(16,13)],[make(22,25)]);
+  assert.equal(result.compatible,false);
+  assert.ok(result.reasons.some(reason=>reason.includes("one forecast outcome per target tick")));
+});
