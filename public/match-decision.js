@@ -163,11 +163,15 @@
     const hits=arr.reduce((s,o)=>s+o.hit,0),rate=hits/n,se=Math.sqrt(base*(1-base)/n);
     return se?normalSF((rate-base)/se):(rate>base?0:1);
   }
+  function isValidatedOutcome(outcome){
+    return Boolean(window.DigitScopeDatasetRegistry && window.DigitScopeDatasetRegistry.validate(outcome).valid);
+  }
   function buildRows(){
     const result=[];
     Object.values(state).forEach(r=>{
       ["MATCH","DIFFERS"].forEach(contract=>{
-        const arr=contract==="MATCH"?r.match:r.differs,mode=contract==="MATCH"?"cold":"hot";
+        const source=contract==="MATCH"?r.match:r.differs;
+        const arr=source.filter(isValidatedOutcome),mode=contract==="MATCH"?"cold":"hot";
         const digit=r.digits.length===TRAIN?choose(r.digits,mode):null;
         const p=digit===null?null:probability(r.digits,digit,contract);
         const base=contract==="MATCH"?BASE:1-BASE;
@@ -190,7 +194,8 @@
     const current=rows.find(x=>x.r.symbol===selectedSymbol&&x.contract===contract);
     const payout=Number($("mdPayout").value),hasQuote=Number.isFinite(payout)&&payout>1;
     const breakEven=hasQuote?1/payout:null;
-    $("mdStatus").textContent=Object.keys(state).length+" markets · independent MATCH/DIFFERS outcomes saved locally · "+(storageOK?"storage active":"storage unavailable");
+    const legacyCount=Object.values(state).reduce((n,r)=>n+r.match.filter(o=>!isValidatedOutcome(o)).length+r.differs.filter(o=>!isValidatedOutcome(o)).length,0);
+    $("mdStatus").textContent=Object.keys(state).length+" markets · "+rows.reduce((n,x)=>n+x.arr.length,0)+" session-verified outcomes eligible · "+legacyCount+" legacy outcomes retained but excluded · "+(storageOK?"storage active":"storage unavailable");
     if(current){
       $("mdDigit").textContent=current.digit===null?"Warming up":String(current.digit);
       $("mdChance").textContent=pct(current.p);
