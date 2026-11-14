@@ -19,8 +19,6 @@ function App(){
   const [connection,setConnection]=useState("CONNECTING");
   const [message,setMessage]=useState("Opening Deriv public market-data connection…");
   const [updatedAt,setUpdatedAt]=useState(null);
-  const [duplicateCount,setDuplicateCount]=useState(0);
-  const seenIds=useRef({});
   const current=ticksByMarket[market]||[];
   const latest=current[current.length-1]||null;
   const analysis=useMemo(()=>window.DigitAnalysis.analyse(current,windowSize,digit),[current,windowSize,digit]);
@@ -35,7 +33,6 @@ function App(){
     let disposed=false;
     let subscriptionId=null;
     let didSubscribe=false;
-    const marketSeen=seenIds.current[market]||(seenIds.current[market]=new Set());
     setTicksByMarket(previous=>({...previous,[market]:[]}));
     setUpdatedAt(null);
 
@@ -102,10 +99,6 @@ function App(){
           const normalized=window.DigitAnalysis.normalizeTick(tick,pip);
           if(!normalized){
             setMessage("A quote could not be interpreted at the supplied precision; it was not counted.");
-            return;
-          }
-          if(!window.DigitAnalysis.rememberTickId(marketSeen,normalized.id)){
-            setDuplicateCount(value=>value+1);
             return;
           }
           setPrecision(previous=>({...previous,[market]:pip}));
@@ -183,7 +176,7 @@ function App(){
 
       <section className="rounded-2xl border border-slate-800 bg-[#0d1b2c] p-4">
         <div className="flex flex-wrap items-center justify-between gap-2"><div><div className="text-[10px] tracking-[.2em] text-cyan-300">LIVE DIGIT TAPE</div><h2 className="mt-1 text-lg font-bold">{market}</h2></div><div className="text-xs text-slate-500">{current.length} buffered ticks · {precisionText}</div></div>
-        <div className="mt-4 flex min-h-12 gap-2 overflow-x-auto pb-2">{current.slice(-40).map((tick,index)=><span key={tick.id||tick.localSequence||index} title={tick.quoteText} className={"grid h-10 min-w-10 place-items-center rounded-lg border text-sm font-bold "+(tick.digit===digit?"border-cyan-300 bg-cyan-300/15 text-cyan-200":"border-slate-700 bg-slate-950 text-slate-200")}>{tick.digit}</span>)}{current.length===0&&<div className="py-3 text-xs text-slate-500">Waiting for the first tick from this market…</div>}</div>
+        <div className="mt-4 flex min-h-12 gap-2 overflow-x-auto pb-2">{current.slice(-40).map((tick,index)=><span key={index} title={tick.quoteText} className={"grid h-10 min-w-10 place-items-center rounded-lg border text-sm font-bold "+(tick.digit===digit?"border-cyan-300 bg-cyan-300/15 text-cyan-200":"border-slate-700 bg-slate-950 text-slate-200")}>{tick.digit}</span>)}{current.length===0&&<div className="py-3 text-xs text-slate-500">Waiting for the first tick from this market…</div>}</div>
       </section>
 
       <section className="rounded-2xl border border-slate-800 bg-[#0d1b2c] p-4 sm:p-5">
@@ -212,7 +205,7 @@ function App(){
         <div className="font-bold text-slate-200">HOW TO READ THESE RESULTS</div>
         <p>MATCHES counts observations equal to the selected digit. DIFFERS counts all other observations. Both use the same market, same recent sample and same denominator. Their counts add to the sample size and their percentages add to 100% when the sample is non-empty.</p>
         <p className="mt-2">The percentages describe only the selected historical/live sample. They do not guarantee the next tick, predict a winning contract or demonstrate a profitable trading strategy.</p>
-        <p className="mt-2">Feed precision: {precisionText}. Duplicate tick IDs skipped this session: {duplicateCount}. {updatedAt?"Last received tick: "+new Date(updatedAt).toLocaleTimeString():"No tick received yet."}</p>
+        <p className="mt-2">Feed precision: {precisionText}. One live subscription is used for the selected market; historical replay is not merged into this sample. Repeated quotes are retained as separate observations because the feed does not provide a separate unique event ID for each tick. {updatedAt?"Last received tick: "+new Date(updatedAt).toLocaleTimeString():"No tick received yet."}</p>
       </section>
     </main>
     <footer className="mx-auto max-w-6xl px-4 pb-8 text-center text-[10px] text-slate-600">DigitScope Pro · Public Deriv market data · Observed frequencies only · No trade execution</footer>
