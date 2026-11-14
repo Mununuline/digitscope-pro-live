@@ -21,7 +21,8 @@
     "DS-08": { name: "Market Evidence & Holdout", kind: "evaluation_view", unit: "view_of_DS-06_outcomes", sampling: "chronological_split_of_DS-06", horizon: 3, baseline: 0.10, independent: false, derivedFrom: "DS-06" }
   });
 
-  const runtimeRecords = [];\n  const REQUIRED = ["dataset_id", "methodology_version", "market", "contract", "model_id",
+  const runtimeRecords = [];
+  const REQUIRED = ["dataset_id", "methodology_version", "market", "contract", "model_id",
     "forecast_origin_tick_id", "target_tick_id", "training_window", "forecast_horizon",
     "observed_digit", "hit", "scored_at_utc"];
 
