@@ -2,11 +2,12 @@ name: DigitScope Pro checks
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feature/dataset-registry-provenance]
   push:
     branches:
       - main
       - feature/three-tick-match-diff-lab
+      - feature/dataset-registry-provenance
 
 jobs:
   syntax-check:
