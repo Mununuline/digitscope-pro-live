@@ -137,7 +137,7 @@
       }
       const gap=total-r.lastTotal;if(gap<=0)return;
       if(gap>digits.length){r.digits=digits.slice(-TRAIN);r.seq=total;r.lastTotal=total;r.pending=[];changed=true;return;}
-      digits.slice(-gap).forEach(d=>consume(r,d));r.lastTotal=total;changed=true;
+      const missingDigits=digits.slice(-gap),missingIds=Array.isArray(row.tickIds)?row.tickIds.slice(-gap):[];missingDigits.forEach((d,i)=>consume(r,d,missingIds[i]||null));r.lastTotal=total;changed=true;
     });
     if(changed){save();populateMarkets();render();}
   }
