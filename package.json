@@ -8,6 +8,7 @@
     "node": ">=18"
   },
   "scripts": {
+    "prestart": "npm run check",
     "start": "node build.js && node server.js",
     "check": "node --check server.js && node --check build.js && npm run test:registry",
     "test:registry": "node --test tests/dataset-registry.test.js"
