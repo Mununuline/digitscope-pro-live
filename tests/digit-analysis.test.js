@@ -14,6 +14,7 @@ test("last digit uses the quote precision, including trailing zeroes",()=>{
   assert.equal(analysis.lastDigit(123.456,3),6);
   assert.equal(analysis.lastDigit(123.456,2),6);
   assert.equal(analysis.lastDigit(123,0),3);
+  assert.equal(analysis.lastDigit(123,"0"),3);
   assert.equal(analysis.lastDigit(0.007,3),7);
 });
 
@@ -66,6 +67,13 @@ test("invalid digit records are excluded rather than corrupting the denominator"
   assert.equal(result.sampleCount,2);
   assert.equal(result.matches.count,1);
   assert.equal(result.differs.count,1);
+});
+
+test("stable tick IDs are accepted once and duplicate deliveries are rejected",()=>{
+  const seen=new Set();
+  assert.equal(analysis.rememberTickId(seen,"tick-1"),true);
+  assert.equal(analysis.rememberTickId(seen,"tick-1"),false);
+  assert.equal(analysis.rememberTickId(seen,"tick-2"),true);
 });
 
 test("repeated quote and timestamp observations remain separate when no stable ID exists",()=>{
