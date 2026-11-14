@@ -38,3 +38,28 @@ test("audit detects duplicate forecast keys and shared targets", () => {
   assert.equal(result.duplicates, 1);
   assert.equal(result.targetReuse, 1);
 });
+
+test("sample comparison requires identical methodology and disjoint target ticks", () => {
+  const make = (target, training_window = 100) => ({
+    dataset_id:"DS-05", methodology_version:"1.0.0", market:"R_100", contract:"MATCH",
+    model_id:"coldest-v1", selected_digit:4, forecast_origin_tick_id:"origin-"+target,
+    target_tick_id:target, training_window, forecast_horizon:3, observed_digit:4,
+    hit:true, scored_at_utc:"2026-11-14T10:00:00Z"
+  });
+  assert.equal(registry.compareSamples([make("t1")],[make("t2")]).compatible, true);
+  const mismatch = registry.compareSamples([make("t1")],[make("t2",250)]);
+  assert.equal(mismatch.compatible, false);
+  assert.match(mismatch.status, /COMPARISON DISABLED/);
+});
+
+test("sample comparison blocks shared target ticks", () => {
+  const make = target => ({
+    dataset_id:"DS-05", methodology_version:"1.0.0", market:"R_100", contract:"MATCH",
+    model_id:"coldest-v1", forecast_origin_tick_id:"origin-"+target, target_tick_id:target,
+    training_window:100, forecast_horizon:3, observed_digit:4, hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"
+  });
+  const result = registry.compareSamples([make("same-target")],[make("same-target")]);
+  assert.equal(result.compatible, false);
+  assert.equal(result.uniqueTargetOverlap, 1);
+});
