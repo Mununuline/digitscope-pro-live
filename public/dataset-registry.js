@@ -23,7 +23,7 @@
 
   const runtimeRecords = [];
   const REQUIRED = ["dataset_id", "methodology_version", "market", "contract", "model_id",
-    "forecast_origin_tick_id", "target_tick_id", "training_window", "forecast_horizon",
+    "forecast_origin_tick_id", "target_tick_id", "tick_identity_version", "training_window", "forecast_horizon",
     "observed_digit", "hit", "scored_at_utc"];
 
   function nonEmpty(value) { return value !== null && value !== undefined && String(value).trim() !== ""; }
@@ -40,6 +40,7 @@
       selected_digit: source.selected_digit === undefined ? null : source.selected_digit,
       forecast_origin_tick_id: source.forecast_origin_tick_id || null,
       target_tick_id: source.target_tick_id || null,
+      tick_identity_version: source.tick_identity_version || "",
       training_window: source.training_window || null,
       forecast_horizon: source.forecast_horizon === undefined ? null : source.forecast_horizon,
       observed_digit: source.observed_digit === undefined ? null : source.observed_digit,
@@ -57,6 +58,25 @@
     if (r.training_window !== null && (!Number.isInteger(r.training_window) || r.training_window < 1)) errors.push("invalid_training_window");
     if (r.selected_digit !== null && !validDigit(r.selected_digit)) errors.push("invalid_selected_digit");
     if (r.observed_digit !== null && !validDigit(r.observed_digit)) errors.push("invalid_observed_digit");
+    if (r.tick_identity_version && r.tick_identity_version !== "session-v1") errors.push("unsupported_tick_identity_version");
+    if (r.tick_identity_version === "session-v1" && nonEmpty(r.forecast_origin_tick_id) && nonEmpty(r.target_tick_id)) {
+      const parseTickId = value => {
+        const prefix = String(r.market) + ":";
+        if (!String(value).startsWith(prefix)) return null;
+        const parts = String(value).slice(prefix.length).split(":");
+        if (parts.length !== 2 || !parts[0] || !/^\\d+$/.test(parts[1])) return null;
+        const sequence = Number(parts[1]);
+        return Number.isSafeInteger(sequence) && sequence > 0 ? { session: parts[0], sequence } : null;
+      };
+      const origin = parseTickId(r.forecast_origin_tick_id), target = parseTickId(r.target_tick_id);
+      if (!origin || !target) errors.push("invalid_session_scoped_tick_id");
+      else {
+        if (origin.session !== target.session) errors.push("cross_session_forecast");
+        if (target.sequence <= origin.sequence) errors.push("target_not_after_origin");
+        if (Number.isInteger(r.forecast_horizon) && target.sequence - origin.sequence !== r.forecast_horizon)
+          errors.push("tick_sequence_horizon_mismatch");
+      }
+    }
     if (r.forecast_origin_tick_id && r.target_tick_id && r.forecast_origin_tick_id === r.target_tick_id) errors.push("origin_equals_target");
     if (r.scored_at_utc && Number.isNaN(Date.parse(r.scored_at_utc))) errors.push("invalid_scored_at_utc");
     return { valid: missing.length === 0 && errors.length === 0, missing, errors, record: r,
@@ -189,6 +209,7 @@
       let complete=0,incomplete=0,malformed=0,duplicates=0,loadedEligible=0,loadedRecords=0;
       const seen=new Map(),targets=new Set(),targetForecastKeys=new Map(),bucketCounts=new Map(),bucketLoaded=new Map();
       const duplicateExamples=[];
+      const conflictFields=["methodology_version","training_window","forecast_horizon","selected_digit","observed_digit","hit"];
       let duplicateGroups=0,identicalDuplicateExcessRecords=0,conflictingDuplicateExcessRecords=0;
       rows.forEach(row=>{
         const bucket=stream.bucket(row)||"unknown";
@@ -205,10 +226,8 @@
         if(v.valid)complete++;else incomplete++;
         const key=[row.market||"",row.contract||"",row.model_id||"",row.forecast_origin_tick_id||"",row.target_tick_id||""].join("|");
         if(nonEmpty(row.forecast_origin_tick_id)&&nonEmpty(row.target_tick_id)){
-          const resultSignature=JSON.stringify([row.methodology_version||"",row.training_window??null,
-            row.forecast_horizon??null,row.selected_digit??null,row.observed_digit??null,row.hit??null]);
-          const prior=seen.get(key)||{count:0,resultSignatures:new Set(),ids:[]};
-          prior.resultSignatures.add(resultSignature);
+          const prior=seen.get(key)||{count:0,fieldValues:Object.fromEntries(conflictFields.map(field=>[field,new Set()])),ids:[]};
+          conflictFields.forEach(field=>prior.fieldValues[field].add(JSON.stringify(row[field]??null)));
           prior.count++;
           if(row.id!==undefined&&prior.ids.length<5)prior.ids.push(row.id);
           seen.set(key,prior);
@@ -224,14 +243,15 @@
       duplicateEntries.forEach(([key,group])=>{
         const excess=group.count-1;
         duplicates+=excess;
-        if(group.resultSignatures.size>1)conflictingDuplicateExcessRecords+=excess;
+        const differingFields=Object.keys(group.fieldValues).filter(field=>group.fieldValues[field].size>1);
+        if(differingFields.length)conflictingDuplicateExcessRecords+=excess;
         else identicalDuplicateExcessRecords+=excess;
         if(duplicateExamples.length<5){
           const parts=key.split("|");
           duplicateExamples.push({market:parts[0],contract:parts[1],model_id:parts[2],
             forecast_origin_tick_id:parts[3],target_tick_id:parts[4],occurrences:group.count,
-            classification:group.resultSignatures.size>1?"CONFLICTING_RESULT":"SAME_RESULT",
-            record_ids:group.ids});
+            classification:differingFields.length?"CONFLICTING_RESULT":"SAME_RESULT",
+            conflicting_fields:differingFields,record_ids:group.ids});
         }
       });
       const repeatedTargetGroups=[...targetForecastKeys.entries()].filter(entry=>entry[1].size>1);
@@ -306,7 +326,7 @@
       panel.innerHTML = '<p style="font-size:10px;letter-spacing:2px;color:#52d6df;font-weight:800">DATA INTEGRITY · VALIDATION SEPARATION</p>' +
         '<h2 style="font-size:19px;margin:4px 0 8px">Dataset Registry &amp; Provenance Control</h2>' +
         '<p style="font-size:12px;color:#ffc477;margin:8px 0">INTEGRATION IN PROGRESS — PERFORMANCE COMPARISON DISABLED until each stream emits and reconciles complete provenance.</p>' +
-        '<p style="font-size:11px;color:#9db0c4;margin:8px 0">Registry definitions are installed. Existing stored outcomes are preserved and are not upgraded with invented tick IDs. Legacy records without origin/target IDs remain labelled provenance-incomplete.</p>' +
+        '<p style="font-size:11px;color:#9db0c4;margin:8px 0">New tick IDs are page-session scoped to prevent counter reuse after reloads. Existing records are preserved; older counter-only IDs remain identity-incomplete because their original session cannot be recovered.</p>' +
         '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
         '<button id="dspPersistentAuditBtn" type="button" style="margin-top:12px;padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run read-only saved-data audit</button><p id="dspPersistentAudit" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Saved browser records have not been inspected. This audit only reads existing storage.</p><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">No runtime outcomes registered yet. Existing persisted records are not included in this page-session audit.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
       const auditButton=panel.querySelector("#dspPersistentAuditBtn");
