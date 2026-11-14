@@ -127,13 +127,27 @@
     const datasetIds = new Set(checked.map(item => item.record.dataset_id));
     const datasetId = datasetIds.size === 1 ? [...datasetIds][0] : null;
     const definition = datasetId ? DEFINITIONS[datasetId] : null;
+    const sessions = new Set();
+    const identityVersions = new Set();
+    rows.forEach(row => {
+      const r = createProvenance(row);
+      identityVersions.add(r.tick_identity_version || "");
+      const prefix = String(r.market || "") + ":";
+      [r.forecast_origin_tick_id, r.target_tick_id].forEach(id => {
+        if (nonEmpty(id) && String(id).startsWith(prefix)) {
+          const parts = String(id).slice(prefix.length).split(":");
+          if (parts.length === 2 && parts[0]) sessions.add(parts[0]);
+        }
+      });
+    });
     return {
       records: rows.length, invalidRecords, homogeneousDefinition: signatures.size === 1,
       signatureCount: signatures.size, duplicateForecastKeys,
       uniqueTargets: targets.size, repeatedTargetGroups: repeatedTargets,
       datasetId, sampling: definition ? definition.sampling : null,
       countUnit: definition ? definition.unit : null,
-      derivedFrom: definition ? definition.derivedFrom || null : null
+      derivedFrom: definition ? definition.derivedFrom || null : null,
+      sessionCount: sessions.size, identityVersionCount: identityVersions.size
     };
   }
 
@@ -154,6 +168,10 @@
     if (ids.has("DS-08")) reasons.push("DS-08 is a derived chronological view of DS-06, not an independent dataset.");
     if (leftProfile.duplicateForecastKeys || rightProfile.duplicateForecastKeys)
       reasons.push("Duplicate forecast identity keys exist inside a sample; resolve record duplication before comparison.");
+    if (leftProfile.sessionCount !== 1 || rightProfile.sessionCount !== 1)
+      reasons.push("Each sample must be restricted to exactly one verified page session; mixed or unscoped tick sessions are not comparable.");
+    if (leftProfile.identityVersionCount !== 1 || rightProfile.identityVersionCount !== 1)
+      reasons.push("Each sample must use one consistent tick identity version.");
     if (leftProfile.sampling !== rightProfile.sampling || leftProfile.countUnit !== rightProfile.countUnit)
       reasons.push("Sampling design and count unit must match exactly.");
     if (leftProfile.sampling && leftProfile.sampling.indexOf("rolling_overlapping") === 0)
@@ -283,6 +301,64 @@
         });return out;
       }}
   ];
+
+  // Build read-only, single-session, exact-cohort chronological partitions
+  // from saved DS-05/06/07 outcomes. These are structural diagnostics only.
+  function storedComparisonCohorts(storage) {
+    let source = storage || null;
+    if (!source) {
+      try { if (typeof localStorage !== "undefined") source = localStorage; }
+      catch (_) { return []; }
+    }
+    if (!source) return [];
+    const cohorts = [];
+    STORAGE_STREAMS.forEach(stream => {
+      let parsed;
+      try {
+        const raw = source.getItem(stream.key);
+        if (!raw) return;
+        parsed = JSON.parse(raw);
+        if (!parsed || parsed.version !== 1 || !parsed.markets) return;
+      } catch (_) { return; }
+      let rows;
+      try { rows = stream.extract(parsed); } catch (_) { return; }
+      const groups = new Map();
+      rows.forEach(row => {
+        if (!row || typeof row !== "object" || !validate(row).valid) return;
+        const r = createProvenance(row);
+        const prefix = String(r.market) + ":";
+        const target = String(r.target_tick_id || "");
+        if (!target.startsWith(prefix)) return;
+        const parts = target.slice(prefix.length).split(":");
+        if (parts.length !== 2 || !parts[0] || !/^\d+$/.test(parts[1])) return;
+        const session = parts[0], sequence = Number(parts[1]);
+        if (!Number.isSafeInteger(sequence)) return;
+        const key = [r.dataset_id,r.methodology_version,r.market,r.contract,r.model_id,
+          r.training_window,r.forecast_horizon,r.tick_identity_version,session].join("|");
+        if (!groups.has(key)) groups.set(key, { rows: [], session, sequenceKey:key,
+          dataset_id:r.dataset_id, market:r.market, contract:r.contract, model_id:r.model_id,
+          methodology_version:r.methodology_version, training_window:r.training_window,
+          forecast_horizon:r.forecast_horizon });
+        groups.get(key).rows.push({ row, sequence });
+      });
+      groups.forEach(group => {
+        group.rows.sort((a,b) => a.sequence-b.sequence);
+        const ordered = group.rows.map(item => item.row);
+        const split = Math.floor(ordered.length / 2);
+        if (split < 1 || ordered.length - split < 1) return;
+        const left = ordered.slice(0, split), right = ordered.slice(split);
+        const check = compareSamples(left, right);
+        cohorts.push({
+          id: group.sequenceKey,
+          label: stream.dataset_id + " · " + group.market + " · " + group.contract +
+            " · " + group.model_id + " · window " + group.training_window +
+            " · session " + group.session.slice(0,8) + "… · " + ordered.length + " outcomes",
+          dataset_id: stream.dataset_id, records: ordered.length, left, right, check
+        });
+      });
+    });
+    return cohorts.sort((a,b)=>a.label.localeCompare(b.label));
+  }
 
   function auditPersistentStorage(storage) {
     let source=storage || null;
@@ -468,7 +544,38 @@
         '<p style="font-size:12px;color:#ffc477;margin:8px 0">INTEGRATION IN PROGRESS — PERFORMANCE COMPARISON DISABLED until each stream emits and reconciles complete provenance.</p>' +
         '<p style="font-size:11px;color:#9db0c4;margin:8px 0">New tick IDs are page-session scoped to prevent counter reuse after reloads. Existing records are preserved; older counter-only IDs remain identity-incomplete because their original session cannot be recovered.</p>' +
         '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th><th align="left">Comparison policy</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-        '<button id="dspPersistentAuditBtn" type="button" style="margin-top:12px;padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run read-only saved-data audit</button><p id="dspPersistentAudit" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Saved browser records have not been inspected. This audit only reads existing storage.</p><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">Waiting for DS-02/DS-03 runtime evaluations and a DS-04 replay snapshot. These are session diagnostics, not saved-data counts.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
+        '<button id="dspPersistentAuditBtn" type="button" style="margin-top:12px;padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run read-only saved-data audit</button><p id="dspPersistentAudit" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Saved browser records have not been inspected. This audit only reads existing storage.</p>' +
+        '<div style="margin-top:14px;padding:12px;background:#0a1725;border:1px solid #35506a;border-radius:10px"><strong style="font-size:13px">Live sample compatibility gate</strong><p style="font-size:11px;color:#9db0c4;margin:6px 0">Builds chronological halves from complete saved outcomes within one exact market/contract/model/window/page-session cohort, then runs compareSamples(). Read-only; no records are changed.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><select id="dspCompatibilityCohort" aria-label="Saved comparison cohort" style="flex:1;min-width:220px;padding:9px;background:#081522;color:#eaf2fb;border:1px solid #35506a;border-radius:8px"><option value="">Refresh cohorts first</option></select><button id="dspCompatibilityRefresh" type="button" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Refresh cohorts</button><button id="dspCompatibilityRun" type="button" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run compatibility gate</button></div><p id="dspCompatibilityResult" role="status" aria-live="polite" style="font-size:11px;white-space:pre-line;color:#ffc477;margin:8px 0 0">NOT RUN — performance comparison remains disabled.</p></div><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">Waiting for DS-02/DS-03 runtime evaluations and a DS-04 replay snapshot. These are session diagnostics, not saved-data counts.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
+      const cohortSelect=panel.querySelector("#dspCompatibilityCohort");
+      const cohortRefresh=panel.querySelector("#dspCompatibilityRefresh");
+      const cohortRun=panel.querySelector("#dspCompatibilityRun");
+      const cohortResult=panel.querySelector("#dspCompatibilityResult");
+      let availableCohorts=[];
+      if(cohortRefresh) cohortRefresh.addEventListener("click",()=>{
+        availableCohorts=storedComparisonCohorts();
+        cohortSelect.replaceChildren();
+        availableCohorts.forEach((cohort,index)=>{
+          const option=document.createElement("option");
+          option.value=String(index); option.textContent=cohort.label; cohortSelect.appendChild(option);
+        });
+        cohortResult.textContent=availableCohorts.length
+          ? "Loaded "+availableCohorts.length+" complete-provenance cohorts. Select one and run the gate."
+          : "NO ELIGIBLE COHORTS — no complete, session-scoped saved cohort has at least two outcomes.";
+      });
+      if(cohortRun) cohortRun.addEventListener("click",()=>{
+        const cohort=availableCohorts[Number(cohortSelect.value)];
+        if(!cohort){cohortResult.textContent="NOT RUN — refresh cohorts and select a valid cohort.";return;}
+        const result=compareSamples(cohort.left,cohort.right);
+        cohortResult.textContent=(result.compatible
+          ? "STRUCTURAL COMPATIBILITY PASS — NOT PERFORMANCE AUTHORIZATION"
+          : "BLOCKED — PERFORMANCE COMPARISON DISABLED")+
+          "\n"+cohort.label+
+          "\nChronological partition: "+result.leftRecords+" discovery / "+result.rightRecords+" later outcomes"+
+          "\nTarget overlap: "+result.uniqueTargetOverlap+
+          "\nSampling: "+cohort.check.leftProfile.sampling+" · count unit: "+cohort.check.leftProfile.countUnit+
+          (result.reasons.length?"\nReasons: "+result.reasons.join(" "):
+            "\nStructural checks passed. This does not establish statistical independence, predictive skill, or a trading edge.");
+      });
       const auditButton=panel.querySelector("#dspPersistentAuditBtn");
       if(auditButton) auditButton.addEventListener("click",()=>{
         const result=auditPersistentStorage();
@@ -527,5 +634,5 @@
     }
   }
 
-  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, sampleProfile, compareSamples, audit, auditPersistentStorage, ingest, reportReplay, runtimeSnapshot, runtimeRecords });
+  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, sampleProfile, compareSamples, storedComparisonCohorts, audit, auditPersistentStorage, ingest, reportReplay, runtimeSnapshot, runtimeRecords });
 });
