@@ -119,31 +119,40 @@
   // Read-only audit of the three persistent validation streams. This function
   // never writes to storage, migrates records, or invents missing identifiers.
   const STORAGE_STREAMS = [
-    { dataset_id:"DS-05", key:"digitscopePro.matchDecision.v1", extract: data => {
-      const out=[]; Object.keys(data.markets||{}).forEach(symbol => {
-        const market=data.markets[symbol]||{};
-        ["match","differs"].forEach(contract => {
-          const rows=market[contract];
-          if(Array.isArray(rows)) rows.forEach(row => out.push(row && typeof row==="object" ? {...row,
-            dataset_id:row.dataset_id||"DS-05", market:row.market||symbol,
-            contract:row.contract||contract.toUpperCase()} : row));
-        });
-      }); return out;
-    }},
-    { dataset_id:"DS-06", key:"digitscopePro.rollingValidation.v1", extract: data => {
-      const out=[]; Object.keys(data.markets||{}).forEach(symbol => {
-        const rows=data.markets[symbol]&&data.markets[symbol].outcomes;
-        if(Array.isArray(rows)) rows.forEach(row => out.push(row && typeof row==="object" ? {...row,
-          dataset_id:row.dataset_id||"DS-06", market:row.market||symbol} : row));
-      }); return out;
-    }},
-    { dataset_id:"DS-07", key:"digitscopePro.statisticalReliability.v1", extract: data => {
-      const out=[]; Object.keys(data.markets||{}).forEach(symbol => {
-        const rows=data.markets[symbol]&&data.markets[symbol].outcomes;
-        if(Array.isArray(rows)) rows.forEach(row => out.push(row && typeof row==="object" ? {...row,
-          dataset_id:row.dataset_id||"DS-07", market:row.market||symbol} : row));
-      }); return out;
-    }}
+    {dataset_id:"DS-05",key:"digitscopePro.matchDecision.v1",maxPerBucket:5000,
+      isLoaded:row=>Boolean(row),bucket:row=>row._auditBucket,
+      extract:data=>{
+        const out=[];Object.keys(data.markets||{}).forEach(symbol=>{
+          const market=data.markets[symbol]||{};
+          ["match","differs"].forEach(contract=>{
+            const rows=market[contract];
+            if(Array.isArray(rows))rows.forEach(row=>out.push(row&&typeof row==="object"?{...row,
+              dataset_id:row.dataset_id||"DS-05",market:row.market||symbol,
+              contract:row.contract||contract.toUpperCase(),_auditBucket:symbol+"|"+contract.toUpperCase()}:
+              {_auditRaw:row,_auditBucket:symbol+"|"+contract.toUpperCase()}));
+          });
+        });return out;
+      }},
+    {dataset_id:"DS-06",key:"digitscopePro.rollingValidation.v1",maxPerBucket:5000,
+      isLoaded:row=>Boolean(row&&typeof row.hit==="boolean"),bucket:row=>row._auditBucket,
+      extract:data=>{
+        const out=[];Object.keys(data.markets||{}).forEach(symbol=>{
+          const rows=data.markets[symbol]&&data.markets[symbol].outcomes;
+          if(Array.isArray(rows))rows.forEach(row=>out.push(row&&typeof row==="object"?{...row,
+            dataset_id:row.dataset_id||"DS-06",market:row.market||symbol,_auditBucket:symbol}:
+            {_auditRaw:row,_auditBucket:symbol}));
+        });return out;
+      }},
+    {dataset_id:"DS-07",key:"digitscopePro.statisticalReliability.v1",maxPerBucket:5000,
+      isLoaded:row=>Boolean(row&&typeof row.hit==="boolean"),bucket:row=>row._auditBucket,
+      extract:data=>{
+        const out=[];Object.keys(data.markets||{}).forEach(symbol=>{
+          const rows=data.markets[symbol]&&data.markets[symbol].outcomes;
+          if(Array.isArray(rows))rows.forEach(row=>out.push(row&&typeof row==="object"?{...row,
+            dataset_id:row.dataset_id||"DS-07",market:row.market||symbol,_auditBucket:symbol}:
+            {_auditRaw:row,_auditBucket:symbol}));
+        });return out;
+      }}
   ];
 
   function auditPersistentStorage(storage) {
@@ -177,23 +186,38 @@
       }
       let rows;
       try { rows=stream.extract(parsed); } catch (_) { rows=[]; }
-      let complete=0,incomplete=0,malformed=0,duplicates=0;
-      const seen=new Set(), targets=new Set();
-      rows.forEach(row => {
-        if(!row || typeof row!=="object" || Array.isArray(row)) { malformed++; return; }
+      let complete=0,incomplete=0,malformed=0,duplicates=0,loadedEligible=0,loadedRecords=0;
+      const seen=new Set(),targets=new Set(),bucketCounts=new Map(),bucketLoaded=new Map();
+      rows.forEach(row=>{
+        const bucket=stream.bucket(row)||"unknown";
+        bucketCounts.set(bucket,(bucketCounts.get(bucket)||0)+1);
+        if(stream.isLoaded(row)){
+          loadedEligible++;
+          const used=bucketLoaded.get(bucket)||0;
+          if(used<stream.maxPerBucket){bucketLoaded.set(bucket,used+1);loadedRecords++;}
+        }
+        if(!row||typeof row!=="object"||Array.isArray(row)||Object.prototype.hasOwnProperty.call(row,"_auditRaw")){
+          malformed++;return;
+        }
         const v=validate(row);
-        if(v.valid) complete++; else incomplete++;
+        if(v.valid)complete++;else incomplete++;
         const key=[row.market||"",row.contract||"",row.model_id||"",row.forecast_origin_tick_id||"",row.target_tick_id||""].join("|");
-        if(nonEmpty(row.forecast_origin_tick_id)&&nonEmpty(row.target_tick_id)) {
-          if(seen.has(key)) duplicates++;
+        if(nonEmpty(row.forecast_origin_tick_id)&&nonEmpty(row.target_tick_id)){
+          if(seen.has(key))duplicates++;
           seen.add(key);
         }
-        if(nonEmpty(row.market)&&nonEmpty(row.target_tick_id)) targets.add(row.market+"|"+row.target_tick_id);
+        if(nonEmpty(row.market)&&nonEmpty(row.target_tick_id))targets.add(row.market+"|"+row.target_tick_id);
         all.push({dataset_id:stream.dataset_id,market:row.market||"",target_tick_id:row.target_tick_id||null});
       });
+      const marketBreakdown=[...bucketCounts.entries()].map(entry=>({
+        bucket:entry[0],storedRecords:entry[1],loadedRecords:Math.min(entry[1],stream.maxPerBucket)
+      }));
       streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"READ ONLY · PARSED",
         storedRecords:rows.length,provenanceComplete:complete,legacyIncomplete:incomplete,
-        malformed,uniqueTargets:targets.size,duplicates});
+        malformed,uniqueTargets:targets.size,duplicates,loadedEligibleRecords:loadedEligible,
+        dashboardLoadedRecords:loadedRecords,excludedFromDashboard:rows.length-loadedRecords,
+        overCapRecords:loadedEligible-loadedRecords,marketBreakdown});
+
     }
     const targetSets=new Map();
     all.forEach(row=>{
