@@ -122,18 +122,72 @@
       reasons, leftRecords:left.length, rightRecords:right.length, uniqueTargetOverlap:overlap };
   }
 
+  let latestReplayAudit = null;
+
+  function runtimeSnapshot() {
+    const byDataset = {};
+    ["DS-02","DS-03"].forEach(datasetId => {
+      const rows = runtimeRecords.filter(row => row.dataset_id === datasetId);
+      const summary = audit(rows);
+      byDataset[datasetId] = {records:summary.records, incomplete:summary.incomplete,
+        duplicates:summary.duplicates, uniqueTargets:new Set(rows.filter(row=>nonEmpty(row.market)&&nonEmpty(row.target_tick_id))
+          .map(row=>row.market+"|"+row.target_tick_id)).size,
+        status:summary.incomplete || summary.duplicates ? "INVALID" : rows.length ? "METADATA PASS" : "WAITING"};
+    });
+    return {byDataset, replay:latestReplayAudit, totalRuntimeRecords:runtimeRecords.length};
+  }
+
+  function renderRuntimeStatus() {
+    if (typeof document === "undefined") return;
+    const node = document.getElementById("dspRegistryRuntime");
+    if (!node) return;
+    const snapshot = runtimeSnapshot();
+    const describe = (id, label) => {
+      const item = snapshot.byDataset[id];
+      return label + " " + item.records + " evaluations · " + item.incomplete +
+        " incomplete · " + item.duplicates + " duplicate keys · " + item.status;
+    };
+    const replay = snapshot.replay
+      ? "DS-04 latest replay " + snapshot.replay.records + " forecasts · " +
+        snapshot.replay.complete + " complete · " + snapshot.replay.incomplete +
+        " incomplete · " + snapshot.replay.duplicates + " duplicate keys · " + snapshot.replay.status +
+        " (selected market/contract/model/window snapshot; not a cumulative sample)"
+      : "DS-04 replay audit waiting for a live replay snapshot";
+    node.textContent = describe("DS-02","DS-02") + " | " + describe("DS-03","DS-03") +
+      " | " + replay + " | Runtime records retained in memory: " + snapshot.totalRuntimeRecords +
+      ". No outcomes are written by this audit.";
+  }
+
   function ingest(record) {
     const result = validate(record);
     runtimeRecords.push(result.record);
     if (runtimeRecords.length > 20000) runtimeRecords.shift();
-    const summary = audit(runtimeRecords);
-    if (typeof document !== "undefined") {
-      const node = document.getElementById("dspRegistryRuntime");
-      if (node) node.textContent = summary.records + " new outcomes observed this page session · " +
-        summary.incomplete + " provenance-incomplete · " + summary.duplicates + " duplicate keys · " +
-        summary.targetReuse + " reused target-tick comparisons · " + summary.status;
-    }
+    renderRuntimeStatus();
     return result;
+  }
+
+  // DS-04 is a derived replay, not a new persistent outcome stream. Replace the
+  // latest view on each render so repeated UI refreshes never inflate counts.
+  function reportReplay(records) {
+    const rows = Array.isArray(records) ? records : [];
+    const checked = rows.map(validate);
+    const seen = new Set();
+    let duplicates = 0;
+    checked.forEach(item => {
+      const r = item.record;
+      const key = [r.market,r.contract,r.model_id,r.forecast_origin_tick_id,r.target_tick_id].join("|");
+      if (nonEmpty(r.forecast_origin_tick_id) && nonEmpty(r.target_tick_id)) {
+        if (seen.has(key)) duplicates++;
+        seen.add(key);
+      }
+    });
+    const incomplete = checked.filter(item=>!item.valid).length;
+    latestReplayAudit = {records:rows.length,complete:rows.length-incomplete,incomplete,duplicates,
+      market:rows[0]?.market||null,contract:rows[0]?.contract||null,model_id:rows[0]?.model_id||null,
+      status:incomplete || duplicates ? "INVALID — REPLAY PROVENANCE CHECK FAILED" :
+        rows.length ? "PROVENANCE PASS" : "WAITING"};
+    renderRuntimeStatus();
+    return latestReplayAudit;
   }
 
   // Read-only audit of the three persistent validation streams. This function
@@ -329,7 +383,7 @@
         '<p style="font-size:12px;color:#ffc477;margin:8px 0">INTEGRATION IN PROGRESS — PERFORMANCE COMPARISON DISABLED until each stream emits and reconciles complete provenance.</p>' +
         '<p style="font-size:11px;color:#9db0c4;margin:8px 0">New tick IDs are page-session scoped to prevent counter reuse after reloads. Existing records are preserved; older counter-only IDs remain identity-incomplete because their original session cannot be recovered.</p>' +
         '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-        '<button id="dspPersistentAuditBtn" type="button" style="margin-top:12px;padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run read-only saved-data audit</button><p id="dspPersistentAudit" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Saved browser records have not been inspected. This audit only reads existing storage.</p><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">No runtime outcomes registered yet. Existing persisted records are not included in this page-session audit.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
+        '<button id="dspPersistentAuditBtn" type="button" style="margin-top:12px;padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run read-only saved-data audit</button><p id="dspPersistentAudit" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Saved browser records have not been inspected. This audit only reads existing storage.</p><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">Waiting for DS-02/DS-03 runtime evaluations and a DS-04 replay snapshot. These are session diagnostics, not saved-data counts.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
       const auditButton=panel.querySelector("#dspPersistentAuditBtn");
       if(auditButton) auditButton.addEventListener("click",()=>{
         const result=auditPersistentStorage();
@@ -376,5 +430,5 @@
     }
   }
 
-  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, compareSamples, audit, auditPersistentStorage, ingest, runtimeRecords });
+  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, compareSamples, audit, auditPersistentStorage, ingest, reportReplay, runtimeSnapshot, runtimeRecords });
 });
