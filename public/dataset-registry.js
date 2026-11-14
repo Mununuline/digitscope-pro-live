@@ -120,7 +120,7 @@
   // never writes to storage, migrates records, or invents missing identifiers.
   const STORAGE_STREAMS = [
     {dataset_id:"DS-05",key:"digitscopePro.matchDecision.v1",maxPerBucket:5000,
-      isLoaded:row=>Boolean(row),bucket:row=>row._auditBucket,
+      isLoaded:row=>Object.prototype.hasOwnProperty.call(row,"_auditRaw")?Boolean(row._auditRaw):Boolean(row),bucket:row=>row._auditBucket,
       extract:data=>{
         const out=[];Object.keys(data.markets||{}).forEach(symbol=>{
           const market=data.markets[symbol]||{};
