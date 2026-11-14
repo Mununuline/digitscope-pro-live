@@ -92,7 +92,8 @@ function App(){
         }
         if(payload.msg_type==="tick"&&payload.tick){
           const tick=payload.tick;
-          if(tick.symbol!==market)return;
+          const tickSymbol=tick.symbol||payload.echo_req?.ticks||market;
+          if(tickSymbol!==market)return;
           const pip=window.DigitAnalysis.readPrecision(tick.pip_size);
           if(pip===null){
             setMessage("Waiting for valid quote precision from Deriv; this tick was not counted.");
