@@ -265,6 +265,7 @@
         repeatedTargetGroups:repeatedTargetGroups.length,
         repeatedTargetExamples:repeatedTargetGroups.slice(0,5).map(entry=>({market_target:entry[0],distinctForecastKeys:entry[1].size})),
         loadedEligibleRecords:loadedEligible,dashboardLoadedRecords:loadedRecords,
+        performanceEligibleRecords:complete,performanceExcludedRecords:rows.length-complete,
         excludedFromDashboard:rows.length-loadedRecords,overCapRecords:loadedEligible-loadedRecords,marketBreakdown});
 
     }
@@ -339,7 +340,8 @@
           const buckets=(s.marketBreakdown||[]).map(x=>x.bucket+" stored="+x.storedRecords+" loaded="+x.loadedRecords).join("; ");
           return s.dataset_id+" · "+s.storage_status+" · stored="+s.storedRecords+
             " · complete="+s.provenanceComplete+" · legacy/incomplete="+s.legacyIncomplete+" · malformed="+s.malformed+
-            " · dashboard-loaded="+s.dashboardLoadedRecords+" · excluded="+s.excludedFromDashboard+
+            " · dashboard-loaded="+s.dashboardLoadedRecords+" · performance-eligible="+(s.performanceEligibleRecords||0)+
+            " · performance-excluded="+(s.performanceExcludedRecords||0)+" · excluded="+s.excludedFromDashboard+
             " · over-cap="+s.overCapRecords+" · unique targets="+s.uniqueTargets+" · duplicate excess rows="+s.duplicates+
             " · duplicate groups="+(s.duplicateGroups||0)+" · same-result repeats="+(s.identicalDuplicateExcessRecords||0)+
             " · conflicting-result repeats="+(s.conflictingDuplicateExcessRecords||0)+
