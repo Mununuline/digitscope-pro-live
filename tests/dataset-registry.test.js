@@ -235,3 +235,19 @@ test("persistent audit applies the dashboard's 5,000-outcome per-market retentio
   assert.equal(stream.dashboardLoadedRecords,5000);
   assert.equal(stream.overCapRecords,3);
 });
+
+
+test("DS-02 and DS-03 session-scoped outcome provenance validates", () => {
+  for (const dataset_id of ["DS-02", "DS-03"]) {
+    const contract = dataset_id === "DS-03" ? "over_4" : "DIGIT_MATCH";
+    const result = registry.validate({
+      dataset_id, methodology_version:"1.0.0", tick_identity_version:"session-v1",
+      market:"1HZ10V", contract, model_id:"rolling-most-frequent-v1",
+      selected_digit:4, forecast_origin_tick_id:"1HZ10V:session-a:10",
+      target_tick_id:"1HZ10V:session-a:13", training_window:100,
+      forecast_horizon:3, observed_digit:4, hit:true,
+      scored_at_utc:"2026-11-14T10:00:00Z"
+    });
+    assert.equal(result.valid, true, dataset_id + " should emit complete session provenance");
+  }
+});
