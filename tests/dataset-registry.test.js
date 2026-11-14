@@ -127,3 +127,38 @@ test("persistent audit counts malformed record entries and repeated target keys"
   assert.equal(stream.duplicates,1);
   assert.equal(stream.uniqueTargets,1);
 });
+
+
+test("persistent audit reconciles storage counts with each dashboard loader", () => {
+  const make = (dataset_id, contract="DIGIT_MATCH") => ({
+    dataset_id, methodology_version:"1.0.0", market:"R_100", contract, model_id:"m",
+    selected_digit:4, forecast_origin_tick_id:"origin-1", target_tick_id:"R_100:104",
+    training_window:100, forecast_horizon:3, observed_digit:4, hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"
+  });
+  const saved = {
+    "digitscopePro.matchDecision.v1": JSON.stringify({version:1,markets:{R_100:{
+      match:[{...make("DS-05","MATCH"),hit:1},{...make("DS-05","MATCH"),hit:0},null],
+      differs:[{...make("DS-05","DIFFERS"),hit:1}]
+    }}}),
+    "digitscopePro.rollingValidation.v1": JSON.stringify({version:1,markets:{R_100:{
+      outcomes:[make("DS-06"),{hit:0},{...make("DS-06"),target_tick_id:"R_100:107"}]
+    }}}),
+    "digitscopePro.statisticalReliability.v1": JSON.stringify({version:1,markets:{R_100:{
+      outcomes:[make("DS-07")]
+    }}})
+  };
+  const result=registry.auditPersistentStorage({getItem:key=>saved[key]||null});
+  const ds05=result.streams.find(x=>x.dataset_id==="DS-05");
+  const ds06=result.streams.find(x=>x.dataset_id==="DS-06");
+  const ds07=result.streams.find(x=>x.dataset_id==="DS-07");
+  assert.equal(ds05.storedRecords,4);
+  assert.equal(ds05.dashboardLoadedRecords,3); // filter(Boolean), then last 5,000 per market/contract
+  assert.equal(ds06.storedRecords,3);
+  assert.equal(ds06.dashboardLoadedRecords,2); // Boolean hit only, then last 5,000 per market
+  assert.equal(ds07.dashboardLoadedRecords,1);
+  assert.equal(result.crossStreamTargetOverlap,1);
+  assert.equal(result.overlapByPair["DS-05/DS-06"],1);
+  assert.equal(result.overlapByPair["DS-05/DS-07"],1);
+  assert.equal(result.overlapByPair["DS-06/DS-07"],1);
+});
