@@ -368,7 +368,7 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
       '<tr><td colspan="6">Collecting the first 100 live training ticks per market…</td></tr>';
   }
 
-  function applyValidationDigit(record, digit) {
+  function applyValidationDigit(record, digit, tickId) {
     record.seq += 1;
 
     const remaining = [];
@@ -377,7 +377,10 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
         remaining.push(forecast);
       } else {
         record.tested += 1;
-        if (digit === forecast.target) record.hits += 1;
+        const hit = digit === forecast.target;
+        if (hit) record.hits += 1;
+        record.outcomes.push({dataset_id:"DS-02",methodology_version:"1.0.0",market:record.symbol,contract:"DIGIT_MATCH",model_id:"rolling-most-frequent-v1",selected_digit:forecast.target,forecast_origin_tick_id:forecast.originTickId||null,target_tick_id:tickId||null,training_window:VALIDATION_LOOKBACK,forecast_horizon:VALIDATION_HORIZON,observed_digit:digit,hit,scored_at_utc:new Date().toISOString()});
+        if (record.outcomes.length > 5000) record.outcomes.shift();
       }
     }
     record.pending = remaining;
@@ -392,7 +395,7 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
       record.digits.forEach(value => { counts[value] += 1; });
       const maxCount = Math.max(...counts);
       const target = counts.indexOf(maxCount);
-      record.pending.push({ target, dueAt: record.seq + VALIDATION_HORIZON });
+      record.pending.push({ target, dueAt: record.seq + VALIDATION_HORIZON, originTickId: tickId || null });
     }
     validationRenderCounter += 1;
   }
@@ -400,7 +403,7 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
   function getValidationRecord(symbol, name) {
     return validationBySymbol[symbol] || (validationBySymbol[symbol] = {
       symbol, name: String(name || symbol), seq: 0, lastTotalTicks: 0,
-      digits: [], pending: [], tested: 0, hits: 0
+      digits: [], pending: [], outcomes: [], tested: 0, hits: 0
     });
   }
 
@@ -421,7 +424,7 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
       if (record.lastTotalTicks && totalTicks !== record.lastTotalTicks + 1) return;
       record.lastTotalTicks = totalTicks;
     }
-    applyValidationDigit(record, digit);
+    applyValidationDigit(record, digit, data.tickId);
     if (validationRenderCounter % 5 === 0 || record.tested === 1) renderValidation();
   }
 
