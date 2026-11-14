@@ -251,3 +251,42 @@ test("DS-02 and DS-03 session-scoped outcome provenance validates", () => {
     assert.equal(result.valid, true, dataset_id + " should emit complete session provenance");
   }
 });
+
+
+test("DS-04 replay audit validates each third-tick origin/target pair without accumulating rerenders", () => {
+  const rows = [0,1,2].map(i => ({
+    dataset_id:"DS-04",methodology_version:"1.0.0",tick_identity_version:"session-v1",
+    market:"1HZ10V",contract:"MATCH",model_id:"coldest-digit-replay-v1",selected_digit:4,
+    forecast_origin_tick_id:"1HZ10V:session-a:"+(10+i),
+    target_tick_id:"1HZ10V:session-a:"+(13+i),training_window:100,forecast_horizon:3,
+    observed_digit:4,hit:true,scored_at_utc:"2026-11-14T10:00:00Z"
+  }));
+  const first=registry.reportReplay(rows);
+  assert.equal(first.records,3);
+  assert.equal(first.complete,3);
+  assert.equal(first.incomplete,0);
+  assert.equal(first.duplicates,0);
+  const second=registry.reportReplay(rows);
+  assert.equal(second.records,3);
+  assert.equal(registry.runtimeSnapshot().replay.records,3);
+  const invalid=registry.reportReplay([{...rows[0],target_tick_id:"1HZ10V:session-a:14"}]);
+  assert.equal(invalid.incomplete,1);
+  assert.match(invalid.status,/INVALID/);
+});
+
+test("DS-02 and DS-03 runtime summaries remain separated by dataset count unit", () => {
+  const make = (dataset_id, contract) => ({
+    dataset_id,methodology_version:"1.0.0",tick_identity_version:"session-v1",
+    market:"1HZ10V",contract,model_id:"model-a",selected_digit:4,
+    forecast_origin_tick_id:"1HZ10V:session-a:10",target_tick_id:"1HZ10V:session-a:13",
+    training_window:100,forecast_horizon:3,observed_digit:4,hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"
+  });
+  registry.ingest(make("DS-02","DIGIT_MATCH"));
+  registry.ingest(make("DS-03","over_4"));
+  const snapshot=registry.runtimeSnapshot();
+  assert.equal(snapshot.byDataset["DS-02"].records,1);
+  assert.equal(snapshot.byDataset["DS-03"].records,1);
+  assert.equal(snapshot.byDataset["DS-02"].incomplete,0);
+  assert.equal(snapshot.byDataset["DS-03"].incomplete,0);
+});
