@@ -185,8 +185,9 @@
     const quote = Number(tick.quote);
     // Deriv tick.id can identify the subscription stream, not a unique tick.
     // Do not use it to deduplicate: that would discard every update after the first.
-    list.push({ digit: Number(last), epoch, quote });
     totalTicksBySymbol[symbol] = (totalTicksBySymbol[symbol] || 0) + 1;
+    const tickId = symbol + ":" + totalTicksBySymbol[symbol];
+    list.push({ digit: Number(last), epoch, quote, tickId });
     if (list.length > MAX_TICKS) list.shift();
 
     const marketInfo = markets.find(item => item.symbol === symbol);
@@ -197,7 +198,8 @@
         digit: Number(last),
         quote,
         epoch,
-        totalTicks: totalTicksBySymbol[symbol]
+        totalTicks: totalTicksBySymbol[symbol],
+        tickId
       }
     }));
 
@@ -250,6 +252,7 @@
           n: row.n,
           counts: row.counts.slice(),
           digits: (samples[row.symbol] || []).map(tick => tick.digit),
+          tickIds: (samples[row.symbol] || []).map(tick => tick.tickId || null),
           totalTicks: totalTicksBySymbol[row.symbol] || 0
         }))
       }
