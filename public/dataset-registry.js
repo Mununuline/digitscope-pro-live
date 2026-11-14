@@ -346,7 +346,8 @@
             " · targets with multiple forecast keys="+(s.repeatedTargetGroups||0)+
             ((s.duplicateExamples||[]).length?"\n  Duplicate examples: "+s.duplicateExamples.map(x=>
               x.market+"|"+x.contract+"|"+x.model_id+" origin="+x.forecast_origin_tick_id+" target="+x.target_tick_id+
-              " occurrences="+x.occurrences+" "+x.classification).join("; "):"")+
+              " occurrences="+x.occurrences+" "+x.classification+
+              (x.conflicting_fields&&x.conflicting_fields.length?" fields="+x.conflicting_fields.join(","):"")).join("; "):"")+
             ((s.repeatedTargetExamples||[]).length?"\n  Reused-target examples: "+s.repeatedTargetExamples.map(x=>
               x.market_target+" ("+x.distinctForecastKeys+" forecast keys)").join("; "):"")+
             (buckets?"\n  By market/contract: "+buckets:"");
