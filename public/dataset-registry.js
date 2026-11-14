@@ -187,7 +187,9 @@
       let rows;
       try { rows=stream.extract(parsed); } catch (_) { rows=[]; }
       let complete=0,incomplete=0,malformed=0,duplicates=0,loadedEligible=0,loadedRecords=0;
-      const seen=new Set(),targets=new Set(),bucketCounts=new Map(),bucketLoaded=new Map();
+      const seen=new Map(),targets=new Set(),targetForecastKeys=new Map(),bucketCounts=new Map(),bucketLoaded=new Map();
+      const duplicateExamples=[];
+      let duplicateGroups=0,identicalDuplicateExcessRecords=0,conflictingDuplicateExcessRecords=0;
       rows.forEach(row=>{
         const bucket=stream.bucket(row)||"unknown";
         bucketCounts.set(bucket,(bucketCounts.get(bucket)||0)+1);
@@ -203,20 +205,44 @@
         if(v.valid)complete++;else incomplete++;
         const key=[row.market||"",row.contract||"",row.model_id||"",row.forecast_origin_tick_id||"",row.target_tick_id||""].join("|");
         if(nonEmpty(row.forecast_origin_tick_id)&&nonEmpty(row.target_tick_id)){
-          if(seen.has(key))duplicates++;
-          seen.add(key);
+          const resultSignature=JSON.stringify([row.methodology_version||"",row.training_window??null,
+            row.forecast_horizon??null,row.selected_digit??null,row.observed_digit??null,row.hit??null]);
+          const prior=seen.get(key)||{count:0,resultSignatures:new Set(),ids:[]};
+          if(prior.count>0){
+            duplicates++;
+            prior.resultSignatures.add(resultSignature);
+            if(prior.count===1)duplicateGroups++;
+            if(prior.resultSignatures.size>1)conflictingDuplicateExcessRecords++;
+            else identicalDuplicateExcessRecords++;
+            if(duplicateExamples.length<5)duplicateExamples.push({
+              market:row.market||"",contract:row.contract||"",model_id:row.model_id||"",
+              forecast_origin_tick_id:row.forecast_origin_tick_id,target_tick_id:row.target_tick_id,
+              occurrences:prior.count+1,classification:prior.resultSignatures.size>1?"CONFLICTING_RESULT":"SAME_RESULT",
+              record_id:row.id??null
+            });
+          } else prior.resultSignatures.add(resultSignature);
+          prior.count++;
+          if(row.id!==undefined&&prior.ids.length<5)prior.ids.push(row.id);
+          seen.set(key,prior);
+          const targetKey=(row.market||"")+"|"+row.target_tick_id;
+          const forecasts=targetForecastKeys.get(targetKey)||new Set();
+          forecasts.add(key);targetForecastKeys.set(targetKey,forecasts);
         }
         if(nonEmpty(row.market)&&nonEmpty(row.target_tick_id))targets.add(row.market+"|"+row.target_tick_id);
         all.push({dataset_id:stream.dataset_id,market:row.market||"",target_tick_id:row.target_tick_id||null});
       });
+      const repeatedTargetGroups=[...targetForecastKeys.entries()].filter(entry=>entry[1].size>1);
       const marketBreakdown=[...bucketCounts.entries()].map(entry=>({
         bucket:entry[0],storedRecords:entry[1],loadedRecords:Math.min(entry[1],stream.maxPerBucket)
       }));
       streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"READ ONLY · PARSED",
         storedRecords:rows.length,provenanceComplete:complete,legacyIncomplete:incomplete,
-        malformed,uniqueTargets:targets.size,duplicates,loadedEligibleRecords:loadedEligible,
-        dashboardLoadedRecords:loadedRecords,excludedFromDashboard:rows.length-loadedRecords,
-        overCapRecords:loadedEligible-loadedRecords,marketBreakdown});
+        malformed,uniqueTargets:targets.size,duplicates,duplicateGroups,
+        identicalDuplicateExcessRecords,conflictingDuplicateExcessRecords,duplicateExamples,
+        repeatedTargetGroups:repeatedTargetGroups.length,
+        repeatedTargetExamples:repeatedTargetGroups.slice(0,5).map(entry=>({market_target:entry[0],distinctForecastKeys:entry[1].size})),
+        loadedEligibleRecords:loadedEligible,dashboardLoadedRecords:loadedRecords,
+        excludedFromDashboard:rows.length-loadedRecords,overCapRecords:loadedEligible-loadedRecords,marketBreakdown});
 
     }
     const targetSets=new Map();
