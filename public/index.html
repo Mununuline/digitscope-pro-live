@@ -1,32 +1,25 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#070d18">
-<meta name="description" content="DigitScope Pro real-time Deriv last-digit Matches and Differs analytics terminal.">
-<title>DigitScope Pro | Matches &amp; Differs Intelligence</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#07111f">
+<meta name="description" content="Simple, transparent live Deriv last-digit MATCHES and DIFFERS analysis.">
+<title>DigitScope Pro | MATCHES &amp; DIFFERS</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<script>tailwind.config={theme:{extend:{fontFamily:{sans:['Inter','system-ui','sans-serif']}}}}</script>
+<script>tailwind.config={theme:{extend:{fontFamily:{sans:["Inter","system-ui","sans-serif"]}}}}</script>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<!-- Lucide CDN removed: avoid loading an ESM build as a classic script. Icons are optional. -->
-<style>html{color-scheme:dark}body{margin:0;background:#070d18;font-family:Inter,system-ui,sans-serif}button,select,input{font:inherit}button:disabled{opacity:.45;cursor:not-allowed}*{scrollbar-width:thin;scrollbar-color:#334155 #0b1422}</style>
+<style>
+html{color-scheme:dark}body{margin:0;background:#07111f;font-family:Inter,system-ui,sans-serif}
+button,select{font:inherit}button:disabled{opacity:.45;cursor:not-allowed}
+*{scrollbar-width:thin;scrollbar-color:#334155 #0b1422}
+</style>
 </head>
 <body>
-<div id="root"><div style="padding:32px;color:#94a3b8">Loading DigitScope Pro terminal…</div></div>
-<script>
-(function(){
-  function showError(message){
-    var root=document.getElementById("root");
-    if(!root)return;
-    root.innerHTML='<div style="max-width:760px;margin:32px auto;padding:24px;color:#f8fafc;font:14px system-ui;background:#172033;border:1px solid #7f1d1d;border-radius:12px"><h2 style="font-size:20px;color:#fca5a5;margin:0 0 12px">DigitScope could not start</h2><p style="color:#cbd5e1">The page loaded, but its app script reported an error. Please send this diagnostic to support:</p><pre style="white-space:pre-wrap;overflow-wrap:anywhere;color:#fde68a">'+String(message).replace(/[&<>]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;"}[c]})+'</pre><p style="color:#94a3b8">Refresh after the next deployment.</p></div>';
-  }
-  window.addEventListener("error",function(e){showError((e.message||"Script error")+" ("+(e.filename||"unknown file")+":"+(e.lineno||"?")+":"+(e.colno||"?")+")");});
-  window.addEventListener("unhandledrejection",function(e){var r=e.reason;showError(r&&r.stack?r.stack:String(r||"Unhandled promise rejection"));});
-  window.digitScopeShowError=showError;
-})();
-</script>
+<div id="root"><div style="padding:32px;color:#94a3b8">Loading DigitScope Pro…</div></div>
 <script src="dataset-registry.js?v=20261114-session-v1"></script>
-<script src="terminal.js?v=compiled-20261113"></script>
+<script src="digit-analysis.js?v=20261114-simple-v1"></script>
+<script src="terminal.js?v=20261114-simple-v1"></script>
 </body>
 </html>
