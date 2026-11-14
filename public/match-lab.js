@@ -160,7 +160,8 @@
       return;
     }
 
-    const digits = market.digits.filter(d => Number.isInteger(d) && d >= 0 && d <= 9).slice(-MAX_SAMPLE);\n    const tickIds = Array.isArray(market.tickIds) ? market.tickIds.slice(-digits.length) : [];
+    const digits = market.digits.filter(d => Number.isInteger(d) && d >= 0 && d <= 9).slice(-MAX_SAMPLE);
+    const tickIds = Array.isArray(market.tickIds) ? market.tickIds.slice(-digits.length) : [];
     const windowSize = Number($("dmlWindow").value);
     const mode = $("dmlStrategy").value;
     const contract = $("dmlContract").value;
