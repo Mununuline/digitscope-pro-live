@@ -261,10 +261,13 @@
       let rows;
       try { rows=stream.extract(parsed); } catch (_) { rows=[]; }
       let complete=0,incomplete=0,malformed=0,duplicates=0,loadedEligible=0,loadedRecords=0;
-      const seen=new Map(),targets=new Set(),targetForecastKeys=new Map(),bucketCounts=new Map(),bucketLoaded=new Map();
-      const duplicateExamples=[];
+      const targets=new Set(),targetForecastKeys=new Map(),bucketCounts=new Map(),bucketLoaded=new Map();
       const conflictFields=["methodology_version","training_window","forecast_horizon","selected_digit","observed_digit","hit"];
-      let duplicateGroups=0,identicalDuplicateExcessRecords=0,conflictingDuplicateExcessRecords=0;
+      const duplicateClasses={
+        complete:{seen:new Map(),groups:0,excess:0,sameResultExcess:0,conflictingResultExcess:0,examples:[]},
+        incomplete:{seen:new Map(),groups:0,excess:0,sameResultExcess:0,conflictingResultExcess:0,examples:[]}
+      };
+      const targetClasses={complete:new Set(),incomplete:new Set()};
       rows.forEach(row=>{
         const bucket=stream.bucket(row)||"unknown";
         bucketCounts.set(bucket,(bucketCounts.get(bucket)||0)+1);
@@ -277,37 +280,52 @@
           malformed++;return;
         }
         const v=validate(row);
+        const classification=v.valid?"complete":"incomplete";
         if(v.valid)complete++;else incomplete++;
         const key=[row.market||"",row.contract||"",row.model_id||"",row.forecast_origin_tick_id||"",row.target_tick_id||""].join("|");
         if(nonEmpty(row.forecast_origin_tick_id)&&nonEmpty(row.target_tick_id)){
-          const prior=seen.get(key)||{count:0,fieldValues:Object.fromEntries(conflictFields.map(field=>[field,new Set()])),ids:[]};
+          const groupMap=duplicateClasses[classification].seen;
+          const prior=groupMap.get(key)||{count:0,fieldValues:Object.fromEntries(conflictFields.map(field=>[field,new Set()])),ids:[]};
           conflictFields.forEach(field=>prior.fieldValues[field].add(JSON.stringify(row[field]??null)));
           prior.count++;
           if(row.id!==undefined&&prior.ids.length<5)prior.ids.push(row.id);
-          seen.set(key,prior);
+          groupMap.set(key,prior);
           const targetKey=(row.market||"")+"|"+row.target_tick_id;
           const forecasts=targetForecastKeys.get(targetKey)||new Set();
           forecasts.add(key);targetForecastKeys.set(targetKey,forecasts);
         }
-        if(nonEmpty(row.market)&&nonEmpty(row.target_tick_id))targets.add(row.market+"|"+row.target_tick_id);
-        all.push({dataset_id:stream.dataset_id,market:row.market||"",target_tick_id:row.target_tick_id||null});
-      });
-      const duplicateEntries=[...seen.entries()].filter(entry=>entry[1].count>1);
-      duplicateGroups=duplicateEntries.length;
-      duplicateEntries.forEach(([key,group])=>{
-        const excess=group.count-1;
-        duplicates+=excess;
-        const differingFields=Object.keys(group.fieldValues).filter(field=>group.fieldValues[field].size>1);
-        if(differingFields.length)conflictingDuplicateExcessRecords+=excess;
-        else identicalDuplicateExcessRecords+=excess;
-        if(duplicateExamples.length<5){
-          const parts=key.split("|");
-          duplicateExamples.push({market:parts[0],contract:parts[1],model_id:parts[2],
-            forecast_origin_tick_id:parts[3],target_tick_id:parts[4],occurrences:group.count,
-            classification:differingFields.length?"CONFLICTING_RESULT":"SAME_RESULT",
-            conflicting_fields:differingFields,record_ids:group.ids});
+        if(nonEmpty(row.market)&&nonEmpty(row.target_tick_id)){
+          const target=row.market+"|"+row.target_tick_id;
+          targets.add(target);targetClasses[classification].add(target);
         }
+        all.push({dataset_id:stream.dataset_id,market:row.market||"",target_tick_id:row.target_tick_id||null,
+          provenance_class:classification});
       });
+      const duplicateExamples=[];
+      for(const classification of ["complete","incomplete"]){
+        const stats=duplicateClasses[classification];
+        const entries=[...stats.seen.entries()].filter(entry=>entry[1].count>1);
+        stats.groups=entries.length;
+        entries.forEach(([key,group])=>{
+          const excess=group.count-1;
+          stats.excess+=excess;
+          const differingFields=Object.keys(group.fieldValues).filter(field=>group.fieldValues[field].size>1);
+          if(differingFields.length)stats.conflictingResultExcess+=excess;
+          else stats.sameResultExcess+=excess;
+          if(stats.examples.length<5){
+            const parts=key.split("|");
+            stats.examples.push({market:parts[0],contract:parts[1],model_id:parts[2],
+              forecast_origin_tick_id:parts[3],target_tick_id:parts[4],occurrences:group.count,
+              classification:differingFields.length?"CONFLICTING_RESULT":"SAME_RESULT",
+              conflicting_fields:differingFields,record_ids:group.ids});
+          }
+        });
+        duplicateExamples.push(...stats.examples.map(example=>({...example,provenance_class:classification})));
+        duplicates+=stats.excess;
+      }
+      const duplicateGroups=duplicateClasses.complete.groups+duplicateClasses.incomplete.groups;
+      const identicalDuplicateExcessRecords=duplicateClasses.complete.sameResultExcess+duplicateClasses.incomplete.sameResultExcess;
+      const conflictingDuplicateExcessRecords=duplicateClasses.complete.conflictingResultExcess+duplicateClasses.incomplete.conflictingResultExcess;
       const repeatedTargetGroups=[...targetForecastKeys.entries()].filter(entry=>entry[1].size>1);
       const marketBreakdown=[...bucketCounts.entries()].map(entry=>({
         bucket:entry[0],storedRecords:entry[1],loadedRecords:Math.min(entry[1],stream.maxPerBucket)
@@ -316,6 +334,18 @@
         storedRecords:rows.length,provenanceComplete:complete,legacyIncomplete:incomplete,
         malformed,uniqueTargets:targets.size,duplicates,duplicateGroups,
         identicalDuplicateExcessRecords,conflictingDuplicateExcessRecords,duplicateExamples,
+        provenanceSplit:{
+          complete:{records:complete,uniqueTargets:targetClasses.complete.size,
+            duplicateGroups:duplicateClasses.complete.groups,duplicateExcessRecords:duplicateClasses.complete.excess,
+            sameResultDuplicateExcessRecords:duplicateClasses.complete.sameResultExcess,
+            conflictingDuplicateExcessRecords:duplicateClasses.complete.conflictingResultExcess,
+            duplicateExamples:duplicateClasses.complete.examples},
+          incomplete:{records:incomplete,uniqueTargets:targetClasses.incomplete.size,
+            duplicateGroups:duplicateClasses.incomplete.groups,duplicateExcessRecords:duplicateClasses.incomplete.excess,
+            sameResultDuplicateExcessRecords:duplicateClasses.incomplete.sameResultExcess,
+            conflictingDuplicateExcessRecords:duplicateClasses.incomplete.conflictingResultExcess,
+            duplicateExamples:duplicateClasses.incomplete.examples}
+        },
         repeatedTargetGroups:repeatedTargetGroups.length,
         repeatedTargetExamples:repeatedTargetGroups.slice(0,5).map(entry=>({market_target:entry[0],distinctForecastKeys:entry[1].size})),
         loadedEligibleRecords:loadedEligible,dashboardLoadedRecords:loadedRecords,
@@ -404,6 +434,18 @@
               x.market+"|"+x.contract+"|"+x.model_id+" origin="+x.forecast_origin_tick_id+" target="+x.target_tick_id+
               " occurrences="+x.occurrences+" "+x.classification+
               (x.conflicting_fields&&x.conflicting_fields.length?" fields="+x.conflicting_fields.join(","):"")).join("; "):"")+
+            ((s.provenanceSplit)? "\n  COMPLETE provenance: records="+s.provenanceSplit.complete.records+
+              " unique-targets="+s.provenanceSplit.complete.uniqueTargets+
+              " duplicate-groups="+s.provenanceSplit.complete.duplicateGroups+
+              " duplicate-excess="+s.provenanceSplit.complete.duplicateExcessRecords+
+              " same-result-excess="+s.provenanceSplit.complete.sameResultDuplicateExcessRecords+
+              " conflicting-excess="+s.provenanceSplit.complete.conflictingDuplicateExcessRecords+
+              "\n  INCOMPLETE/LEGACY: records="+s.provenanceSplit.incomplete.records+
+              " unique-targets="+s.provenanceSplit.incomplete.uniqueTargets+
+              " duplicate-groups="+s.provenanceSplit.incomplete.duplicateGroups+
+              " duplicate-excess="+s.provenanceSplit.incomplete.duplicateExcessRecords+
+              " same-result-excess="+s.provenanceSplit.incomplete.sameResultDuplicateExcessRecords+
+              " conflicting-excess="+s.provenanceSplit.incomplete.conflictingDuplicateExcessRecords:"")+
             ((s.repeatedTargetExamples||[]).length?"\n  Reused-target examples: "+s.repeatedTargetExamples.map(x=>
               x.market_target+" ("+x.distinctForecastKeys+" forecast keys)").join("; "):"")+
             (buckets?"\n  By market/contract: "+buckets:"");
