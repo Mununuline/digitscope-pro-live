@@ -205,7 +205,9 @@
         return;
       }
 
-      digits.slice(-gap).forEach(digit => scoreDigit(record, digit, 0));
+      const missingDigits = digits.slice(-gap);
+      const missingIds = Array.isArray(row.tickIds) ? row.tickIds.slice(-gap) : [];
+      missingDigits.forEach((digit, index) => scoreDigit(record, digit, 0, missingIds[index] || null));
       record.lastTotalTicks = totalTicks;
       changed = true;
     });
