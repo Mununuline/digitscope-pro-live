@@ -105,7 +105,7 @@
             hit: actual === target,
             epoch: Number(epoch) || 0,
             outcomeVersion: 2,
-            dataset_id: "DS-06", methodology_version: "1.0.0", market: record.symbol,
+            dataset_id: "DS-06", methodology_version: "1.0.0", tick_identity_version: "session-v1", market: record.symbol,
             contract: "DIGIT_MATCH", model_id: "rolling-most-frequent-v1", selected_digit: target,
             forecast_origin_tick_id: forecast.originTickId || null, target_tick_id: tickId || null,
             training_window: LOOKBACK, forecast_horizon: HORIZON, observed_digit: actual,
