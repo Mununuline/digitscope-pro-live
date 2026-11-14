@@ -285,11 +285,18 @@
         const result=auditPersistentStorage();
         const output=panel.querySelector("#dspPersistentAudit");
         if(!result.available){output.textContent=result.status;return;}
-        output.innerHTML=result.streams.map(s=>"<b>"+s.dataset_id+"</b> · "+s.storage_status+" · stored "+s.storedRecords+
-          " · complete "+s.provenanceComplete+" · legacy/incomplete "+s.legacyIncomplete+" · malformed "+s.malformed+
-          " · dashboard-loaded "+s.dashboardLoadedRecords+" · excluded "+s.excludedFromDashboard+" · over-cap "+s.overCapRecords+" · unique targets "+s.uniqueTargets+" · duplicate keys "+s.duplicates).join("<br>")+
-          "<br><b>Cross-stream shared market/target ticks:</b> "+result.crossStreamTargetOverlap+" · "+Object.entries(result.overlapByPair||{}).map(x=>x[0]+": "+x[1]).join(" · ")+
-          "<br><b>"+result.status+"</b>";
+        output.style.whiteSpace="pre-line";
+        output.textContent=result.streams.map(s=>{
+          const buckets=(s.marketBreakdown||[]).map(x=>x.bucket+" stored="+x.storedRecords+" loaded="+x.loadedRecords).join("; ");
+          return s.dataset_id+" · "+s.storage_status+" · stored="+s.storedRecords+
+            " · complete="+s.provenanceComplete+" · legacy/incomplete="+s.legacyIncomplete+" · malformed="+s.malformed+
+            " · dashboard-loaded="+s.dashboardLoadedRecords+" · excluded="+s.excludedFromDashboard+
+            " · over-cap="+s.overCapRecords+" · unique targets="+s.uniqueTargets+" · duplicate keys="+s.duplicates+
+            (buckets?"\n  By market/contract: "+buckets:"");
+        }).join("\n")+
+          "\nCross-stream shared market/target ticks: "+result.crossStreamTargetOverlap+
+          " · "+Object.entries(result.overlapByPair||{}).map(x=>x[0]+": "+x[1]).join(" · ")+
+          "\n"+result.status;
       });
       const hero = main.querySelector(".hero");
       if (hero) hero.insertAdjacentElement("afterend", panel);
