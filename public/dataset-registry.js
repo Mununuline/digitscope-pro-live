@@ -208,19 +208,7 @@
           const resultSignature=JSON.stringify([row.methodology_version||"",row.training_window??null,
             row.forecast_horizon??null,row.selected_digit??null,row.observed_digit??null,row.hit??null]);
           const prior=seen.get(key)||{count:0,resultSignatures:new Set(),ids:[]};
-          if(prior.count>0){
-            duplicates++;
-            prior.resultSignatures.add(resultSignature);
-            if(prior.count===1)duplicateGroups++;
-            if(prior.resultSignatures.size>1)conflictingDuplicateExcessRecords++;
-            else identicalDuplicateExcessRecords++;
-            if(duplicateExamples.length<5)duplicateExamples.push({
-              market:row.market||"",contract:row.contract||"",model_id:row.model_id||"",
-              forecast_origin_tick_id:row.forecast_origin_tick_id,target_tick_id:row.target_tick_id,
-              occurrences:prior.count+1,classification:prior.resultSignatures.size>1?"CONFLICTING_RESULT":"SAME_RESULT",
-              record_id:row.id??null
-            });
-          } else prior.resultSignatures.add(resultSignature);
+          prior.resultSignatures.add(resultSignature);
           prior.count++;
           if(row.id!==undefined&&prior.ids.length<5)prior.ids.push(row.id);
           seen.set(key,prior);
@@ -230,6 +218,21 @@
         }
         if(nonEmpty(row.market)&&nonEmpty(row.target_tick_id))targets.add(row.market+"|"+row.target_tick_id);
         all.push({dataset_id:stream.dataset_id,market:row.market||"",target_tick_id:row.target_tick_id||null});
+      });
+      const duplicateEntries=[...seen.entries()].filter(entry=>entry[1].count>1);
+      duplicateGroups=duplicateEntries.length;
+      duplicateEntries.forEach(([key,group])=>{
+        const excess=group.count-1;
+        duplicates+=excess;
+        if(group.resultSignatures.size>1)conflictingDuplicateExcessRecords+=excess;
+        else identicalDuplicateExcessRecords+=excess;
+        if(duplicateExamples.length<5){
+          const parts=key.split("|");
+          duplicateExamples.push({market:parts[0],contract:parts[1],model_id:parts[2],
+            forecast_origin_tick_id:parts[3],target_tick_id:parts[4],occurrences:group.count,
+            classification:group.resultSignatures.size>1?"CONFLICTING_RESULT":"SAME_RESULT",
+            record_ids:group.ids});
+        }
       });
       const repeatedTargetGroups=[...targetForecastKeys.entries()].filter(entry=>entry[1].size>1);
       const marketBreakdown=[...bucketCounts.entries()].map(entry=>({
