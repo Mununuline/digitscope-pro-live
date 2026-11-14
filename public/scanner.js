@@ -6,6 +6,10 @@
   const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
   const MAX_TICKS = 1000;
   const MIN_SAMPLE = 100;
+  // The counter restarts on page reload; scope IDs to this scanner session.
+  const TICK_SESSION_ID = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    ? crypto.randomUUID()
+    : Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
   let ws = null;
   let markets = [];
   let samples = Object.create(null);
@@ -186,7 +190,7 @@
     // Deriv tick.id can identify the subscription stream, not a unique tick.
     // Do not use it to deduplicate: that would discard every update after the first.
     totalTicksBySymbol[symbol] = (totalTicksBySymbol[symbol] || 0) + 1;
-    const tickId = symbol + ":" + totalTicksBySymbol[symbol];
+    const tickId = symbol + ":" + TICK_SESSION_ID + ":" + totalTicksBySymbol[symbol];
     list.push({ digit: Number(last), epoch, quote, tickId });
     if (list.length > MAX_TICKS) list.shift();
 
