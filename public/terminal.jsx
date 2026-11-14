@@ -84,6 +84,8 @@ function App(){
         if(payload.msg_type==="pong"||payload.msg_type==="ping"){
           if(!didSubscribe&&socket&&socket.readyState===WebSocket.OPEN){
             didSubscribe=true;
+            setConnection("LIVE");
+            setMessage("Public feed is ready. Waiting for the first tick from "+market+"…");
             socket.send(JSON.stringify({ticks:market,subscribe:1}));
           }
           return;
@@ -115,8 +117,7 @@ function App(){
 
       socket.onerror=()=>{
         if(disposed)return;
-        setConnection("ERROR");
-        setMessage("The Deriv WebSocket reported a connection error. Reconnecting…");
+        scheduleReconnect("The Deriv WebSocket reported a connection error. Reconnecting…");
       };
       socket.onclose=()=>{
         if(disposed)return;
