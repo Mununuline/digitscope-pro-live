@@ -4,15 +4,11 @@
   "private": true,
   "description": "Live Deriv synthetic-index digit analytics dashboard",
   "main": "server.js",
-  "engines": {
-    "node": ">=18"
-  },
+  "engines": { "node": ">=18" },
   "scripts": {
     "start": "node build.js && node server.js",
-    "check": "node --check server.js && node --check build.js"
+    "check": "node --check server.js && node --check build.js",
+    "test:registry": "node --test tests/dataset-registry.test.js"
   },
-  "dependencies": {
-    "express": "^4.21.2",
-    "esbuild": "^0.25.0"
-  }
+  "dependencies": { "express": "^4.21.2", "esbuild": "^0.25.0" }
 }
