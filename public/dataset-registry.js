@@ -156,7 +156,7 @@
       reasons.push("Duplicate forecast identity keys exist inside a sample; resolve record duplication before comparison.");
     if (leftProfile.sampling !== rightProfile.sampling || leftProfile.countUnit !== rightProfile.countUnit)
       reasons.push("Sampling design and count unit must match exactly.");
-    if (leftProfile.sampling === "rolling_overlapping")
+    if (leftProfile.sampling && leftProfile.sampling.indexOf("rolling_overlapping") === 0)
       reasons.push("Rolling-overlapping forecasts are dependent; independent-sample performance comparison is disabled pending dependence-aware analysis.");
     const signature = r => [r.dataset_id,r.methodology_version,r.market,r.contract,r.model_id,r.training_window,r.forecast_horizon].join("|");
     const leftKeys = new Set(left.map(signature)), rightKeys = new Set(right.map(signature));
@@ -458,13 +458,13 @@
       panel.id = "dspDataIntegrity";
       panel.style.cssText = "margin:14px 0;padding:18px;background:#101d2d;border:1px solid #76552b;border-radius:14px;color:#eaf2fb";
       const rows = Object.entries(DEFINITIONS).map(([id, d]) =>
-        "<tr><td>"+id+"</td><td>"+d.name+"</td><td>"+d.unit+"</td><td>"+d.sampling+"</td><td>"+(d.derivedFrom || "—")+"</td></tr>"
+        "<tr><td>"+id+"</td><td>"+d.name+"</td><td>"+d.unit+"</td><td>"+d.sampling+"</td><td>"+(d.derivedFrom || "—")+"</td><td>"+({ "DS-01":"RAW TICKS · separate unit", "DS-02":"DESCRIPTIVE · rolling overlap", "DS-03":"DESCRIPTIVE · rolling multi-model", "DS-04":"SNAPSHOT ONLY · rolling replay", "DS-05":"CONDITIONAL · disjoint targets + exact cohort", "DS-06":"DESCRIPTIVE · rolling overlap", "DS-07":"CONDITIONAL · disjoint targets + exact cohort", "DS-08":"DERIVED VIEW · never independent" }[id] || "REVIEW REQUIRED")+"</td></tr>"
       ).join("");
       panel.innerHTML = '<p style="font-size:10px;letter-spacing:2px;color:#52d6df;font-weight:800">DATA INTEGRITY · VALIDATION SEPARATION</p>' +
         '<h2 style="font-size:19px;margin:4px 0 8px">Dataset Registry &amp; Provenance Control</h2>' +
         '<p style="font-size:12px;color:#ffc477;margin:8px 0">INTEGRATION IN PROGRESS — PERFORMANCE COMPARISON DISABLED until each stream emits and reconciles complete provenance.</p>' +
         '<p style="font-size:11px;color:#9db0c4;margin:8px 0">New tick IDs are page-session scoped to prevent counter reuse after reloads. Existing records are preserved; older counter-only IDs remain identity-incomplete because their original session cannot be recovered.</p>' +
-        '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th><th align="left">Comparison policy</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
         '<button id="dspPersistentAuditBtn" type="button" style="margin-top:12px;padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run read-only saved-data audit</button><p id="dspPersistentAudit" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Saved browser records have not been inspected. This audit only reads existing storage.</p><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">Waiting for DS-02/DS-03 runtime evaluations and a DS-04 replay snapshot. These are session diagnostics, not saved-data counts.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
       const auditButton=panel.querySelector("#dspPersistentAuditBtn");
       if(auditButton) auditButton.addEventListener("click",()=>{
