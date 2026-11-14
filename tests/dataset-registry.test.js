@@ -162,3 +162,21 @@ test("persistent audit reconciles storage counts with each dashboard loader", ()
   assert.equal(result.overlapByPair["DS-05/DS-07"],1);
   assert.equal(result.overlapByPair["DS-06/DS-07"],1);
 });
+
+
+test("persistent audit applies the dashboard's 5,000-outcome per-market retention cap", () => {
+  const outcomes=Array.from({length:5003},(_,i)=>({
+    dataset_id:"DS-06",methodology_version:"1.0.0",market:"R_100",contract:"DIGIT_MATCH",
+    model_id:"m",selected_digit:1,forecast_origin_tick_id:"o"+i,target_tick_id:"t"+i,
+    training_window:100,forecast_horizon:3,observed_digit:1,hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"
+  }));
+  const raw=JSON.stringify({version:1,markets:{R_100:{outcomes}}});
+  const result=registry.auditPersistentStorage({getItem:key=>
+    key==="digitscopePro.rollingValidation.v1"?raw:null
+  });
+  const stream=result.streams.find(x=>x.dataset_id==="DS-06");
+  assert.equal(stream.storedRecords,5003);
+  assert.equal(stream.dashboardLoadedRecords,5000);
+  assert.equal(stream.overCapRecords,3);
+});
