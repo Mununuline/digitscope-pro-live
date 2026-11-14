@@ -54,7 +54,7 @@ test("DS-08 is never represented as an independent comparable stream", () => {
 
 test("audit detects duplicate forecast keys and shared targets", () => {
   const base = { dataset_id:"DS-05", methodology_version:"1", market:"R_100", contract:"MATCH",
-    model_id:"m1", forecast_origin_tick_id:"o1", target_tick_id:"t4", training_window:100,
+    model_id:"m1", forecast_origin_tick_id:"R_100:session-a:1", target_tick_id:"R_100:session-a:4", training_window:100,
     forecast_horizon:3, observed_digit:2, hit:false, scored_at_utc:"2026-11-14T10:00:00Z" };
   const other = {...base, dataset_id:"DS-07", model_id:"m2", forecast_origin_tick_id:"o2"};
   const result = registry.audit([base, base, other]);
@@ -65,8 +65,9 @@ test("audit detects duplicate forecast keys and shared targets", () => {
 test("sample comparison requires identical methodology and disjoint target ticks", () => {
   const make = (target, training_window = 100) => ({
     dataset_id:"DS-05", methodology_version:"1.0.0", market:"R_100", contract:"MATCH",
-    model_id:"coldest-v1", selected_digit:4, forecast_origin_tick_id:"origin-"+target,
-    target_tick_id:target, training_window, forecast_horizon:3, observed_digit:4,
+    model_id:"coldest-v1", selected_digit:4, tick_identity_version:"session-v1",
+    forecast_origin_tick_id:"R_100:"+target+":10", target_tick_id:"R_100:"+target+":13",
+    training_window, forecast_horizon:3, observed_digit:4,
     hit:true, scored_at_utc:"2026-11-14T10:00:00Z"
   });
   assert.equal(registry.compareSamples([make("t1")],[make("t2")]).compatible, true);
@@ -78,7 +79,8 @@ test("sample comparison requires identical methodology and disjoint target ticks
 test("sample comparison blocks shared target ticks", () => {
   const make = target => ({
     dataset_id:"DS-05", methodology_version:"1.0.0", market:"R_100", contract:"MATCH",
-    model_id:"coldest-v1", forecast_origin_tick_id:"origin-"+target, target_tick_id:target,
+    model_id:"coldest-v1", tick_identity_version:"session-v1",
+    forecast_origin_tick_id:"R_100:shared-session:10", target_tick_id:"R_100:shared-session:13",
     training_window:100, forecast_horizon:3, observed_digit:4, hit:true,
     scored_at_utc:"2026-11-14T10:00:00Z"
   });
@@ -90,9 +92,10 @@ test("sample comparison blocks shared target ticks", () => {
 
 test("persistent audit reads legacy and complete records without mutating storage", () => {
   const complete = {
-    dataset_id:"DS-07", methodology_version:"1.0.0", market:"R_100", contract:"DIGIT_MATCH",
-    model_id:"rolling-most-frequent-v1", selected_digit:4, forecast_origin_tick_id:"o1",
-    target_tick_id:"t4", training_window:100, forecast_horizon:3, observed_digit:4,
+    dataset_id:"DS-07", methodology_version:"1.0.0", tick_identity_version:"session-v1",
+    market:"R_100", contract:"DIGIT_MATCH", model_id:"rolling-most-frequent-v1", selected_digit:4,
+    forecast_origin_tick_id:"R_100:session-a:1", target_tick_id:"R_100:session-a:4",
+    training_window:100, forecast_horizon:3, observed_digit:4,
     hit:true, scored_at_utc:"2026-11-14T10:00:00Z"
   };
   const legacy = { hit:true, target:4, actual:4 };
@@ -145,7 +148,8 @@ test("persistent audit counts malformed record entries and repeated target keys"
   const result=registry.auditPersistentStorage(storage);
   const stream=result.streams.find(x=>x.dataset_id==="DS-07");
   assert.equal(stream.storedRecords,3);
-  assert.equal(stream.provenanceComplete,2);
+  assert.equal(stream.provenanceComplete,0);
+  assert.equal(stream.legacyIncomplete,2);
   assert.equal(stream.malformed,1);
   assert.equal(stream.duplicates,1);
   assert.equal(stream.duplicateGroups,1);
@@ -179,8 +183,9 @@ test("persistent audit separates conflicting duplicate keys from repeated target
 
 test("persistent audit reconciles storage counts with each dashboard loader", () => {
   const make = (dataset_id, contract="DIGIT_MATCH") => ({
-    dataset_id, methodology_version:"1.0.0", market:"R_100", contract, model_id:"m",
-    selected_digit:4, forecast_origin_tick_id:"origin-1", target_tick_id:"R_100:104",
+    dataset_id, methodology_version:"1.0.0", tick_identity_version:"session-v1",
+    market:"R_100", contract, model_id:"m", selected_digit:4,
+    forecast_origin_tick_id:"R_100:session-a:1", target_tick_id:"R_100:session-a:4",
     training_window:100, forecast_horizon:3, observed_digit:4, hit:true,
     scored_at_utc:"2026-11-14T10:00:00Z"
   });
@@ -190,7 +195,7 @@ test("persistent audit reconciles storage counts with each dashboard loader", ()
       differs:[{...make("DS-05","DIFFERS"),hit:1}]
     }}}),
     "digitscopePro.rollingValidation.v1": JSON.stringify({version:1,markets:{R_100:{
-      outcomes:[make("DS-06"),{hit:0},{...make("DS-06"),target_tick_id:"R_100:107"}]
+      outcomes:[make("DS-06"),{hit:0},{...make("DS-06"),forecast_origin_tick_id:"R_100:session-a:4",target_tick_id:"R_100:session-a:7"}]
     }}}),
     "digitscopePro.statisticalReliability.v1": JSON.stringify({version:1,markets:{R_100:{
       outcomes:[make("DS-07")]
@@ -214,8 +219,10 @@ test("persistent audit reconciles storage counts with each dashboard loader", ()
 
 test("persistent audit applies the dashboard's 5,000-outcome per-market retention cap", () => {
   const outcomes=Array.from({length:5003},(_,i)=>({
-    dataset_id:"DS-06",methodology_version:"1.0.0",market:"R_100",contract:"DIGIT_MATCH",
-    model_id:"m",selected_digit:1,forecast_origin_tick_id:"o"+i,target_tick_id:"t"+i,
+    dataset_id:"DS-06",methodology_version:"1.0.0",tick_identity_version:"session-v1",
+    market:"R_100",contract:"DIGIT_MATCH",model_id:"m",selected_digit:1,
+    forecast_origin_tick_id:"R_100:retention-session:"+(i*3+1),
+    target_tick_id:"R_100:retention-session:"+(i*3+4),
     training_window:100,forecast_horizon:3,observed_digit:1,hit:true,
     scored_at_utc:"2026-11-14T10:00:00Z"
   }));
