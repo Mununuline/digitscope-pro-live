@@ -380,6 +380,7 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
         const hit = digit === forecast.target;
         if (hit) record.hits += 1;
         record.outcomes.push({dataset_id:"DS-02",methodology_version:"1.0.0",market:record.symbol,contract:"DIGIT_MATCH",model_id:"rolling-most-frequent-v1",selected_digit:forecast.target,forecast_origin_tick_id:forecast.originTickId||null,target_tick_id:tickId||null,training_window:VALIDATION_LOOKBACK,forecast_horizon:VALIDATION_HORIZON,observed_digit:digit,hit,scored_at_utc:new Date().toISOString()});
+        if (window.DigitScopeDatasetRegistry) window.DigitScopeDatasetRegistry.ingest(record.outcomes[record.outcomes.length - 1]);
         if (record.outcomes.length > 5000) record.outcomes.shift();
       }
     }
