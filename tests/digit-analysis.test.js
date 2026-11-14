@@ -66,6 +66,10 @@ test("invalid digit records are excluded rather than corrupting the denominator"
   assert.equal(result.sampleCount,2);
   assert.equal(result.matches.count,1);
   assert.equal(result.differs.count,1);
+  const recent=analysis.analyse([{digit:1},{digit:12},{digit:2},{digit:3}],2,2);
+  assert.equal(recent.sampleCount,2);
+  assert.equal(recent.matches.count,1);
+  assert.equal(recent.differs.count,1);
 });
 
 test("repeated quote and timestamp observations remain separate",()=>{
