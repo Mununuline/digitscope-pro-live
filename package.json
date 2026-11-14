@@ -1,8 +1,8 @@
 {
   "name": "digitscope-pro-live",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "Live Deriv synthetic-index digit analytics dashboard",
+  "description": "Simple live Deriv last-digit MATCHES and DIFFERS analytics",
   "main": "server.js",
   "engines": {
     "node": ">=18"
@@ -10,8 +10,9 @@
   "scripts": {
     "prestart": "npm run check",
     "start": "node build.js && node server.js",
-    "check": "node --check server.js && node --check build.js && node --check public/scanner.js && node --check public/dataset-registry.js && node --check public/intelligence.js && node --check public/trade-scanner.js && node --check public/match-lab.js && node --check public/match-decision.js && node --check public/rolling-performance.js && node --check public/statistical-reliability.js && npm run test:registry",
-    "test:registry": "node --test tests/dataset-registry.test.js"
+    "check": "node --check server.js && node --check build.js && node --check public/dataset-registry.js && node --check public/digit-analysis.js && node --check public/scanner.js && node --check public/intelligence.js && node --check public/trade-scanner.js && node --check public/match-lab.js && node --check public/match-decision.js && node --check public/rolling-performance.js && node --check public/statistical-reliability.js && node build.js && node --check public/terminal.js && npm run test:registry && npm run test:analysis",
+    "test:registry": "node --test tests/dataset-registry.test.js",
+    "test:analysis": "node --test tests/digit-analysis.test.js"
   },
   "dependencies": {
     "express": "^4.21.2",
