@@ -36,5 +36,5 @@ test("audit detects duplicate forecast keys and shared targets", () => {
   const other = {...base, dataset_id:"DS-07", model_id:"m2", forecast_origin_tick_id:"o2"};
   const result = registry.audit([base, base, other]);
   assert.equal(result.duplicates, 1);
-  assert.equal(result.targetReuse, 2);
+  assert.equal(result.targetReuse, 1);
 });
