@@ -147,7 +147,11 @@
   ];
 
   function auditPersistentStorage(storage) {
-    const source=storage || (typeof localStorage!=="undefined" ? localStorage : null);
+    let source=storage || null;
+    if(!source) {
+      try { if(typeof localStorage!=="undefined") source=localStorage; }
+      catch (_) { return {available:false,status:"STORAGE ACCESS BLOCKED",streams:[],crossStreamTargetOverlap:0}; }
+    }
     if(!source) return {available:false,status:"STORAGE UNAVAILABLE",streams:[],crossStreamTargetOverlap:0};
     const streams=[], all=[];
     for(const stream of STORAGE_STREAMS) {
