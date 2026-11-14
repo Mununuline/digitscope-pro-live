@@ -45,7 +45,7 @@ test("MATCHES and DIFFERS partition the same sample for every selected digit",()
   for(let digit=0;digit<=9;digit++){
     const result=analysis.analyse(ticks,100,digit);
     assert.equal(result.matches.count+result.differs.count,result.sampleCount);
-    assert.equal(result.matches.percentage+result.differs.percentage,100);
+    assert.ok(Math.abs(result.matches.percentage+result.differs.percentage-100)<1e-10);
   }
 });
 
