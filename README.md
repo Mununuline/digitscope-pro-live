@@ -16,7 +16,9 @@ A focused, mobile-friendly Deriv last-digit analysis dashboard.
 - A tick is counted only when Deriv supplies a valid quote precision and the quote can be formatted at that precision.
 - The last digit is extracted from the final digit of the precision-formatted quote.
 - The app collects one live stream for the selected market. It does not combine historical replay with live subscription data.
-- Stable Deriv tick IDs are used to skip repeated deliveries when those IDs are present. Repeated quotes and timestamps without a stable ID are not collapsed, because they may be legitimate separate ticks.
+- The app maintains one live subscription for the selected market and does not combine historical replay with live subscription data.
+- Deriv documents the tick-level `id` as a per-connection subscription identifier used with `forget`, not as a unique identifier for each tick. The app does not misuse it for deduplication.
+- Repeated quotes and timestamps are retained as separate observations because they may represent legitimate separate ticks. The public tick stream does not expose a separate guaranteed unique event ID for each observation.
 - The displayed sample is the most recent valid observations up to the selected window. The actual sample count is always shown.
 - MATCHES and DIFFERS use the same denominator: MATCHES counts the selected digit; DIFFERS counts all other digits. Their counts sum to the sample size.
 
