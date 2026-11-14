@@ -545,8 +545,8 @@
         '<p style="font-size:11px;color:#9db0c4;margin:8px 0">New tick IDs are page-session scoped to prevent counter reuse after reloads. Existing records are preserved; older counter-only IDs remain identity-incomplete because their original session cannot be recovered.</p>' +
         '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th><th align="left">Comparison policy</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
         '<button id="dspPersistentAuditBtn" type="button" style="margin-top:12px;padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run read-only saved-data audit</button><p id="dspPersistentAudit" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Saved browser records have not been inspected. This audit only reads existing storage.</p>' +
-        '<div style="margin-top:14px;padding:12px;background:#0a1725;border:1px solid #35506a;border-radius:10px"><strong style="font-size:13px">Live sample compatibility gate</strong><p style="font-size:11px;color:#9db0c4;margin:6px 0">Select a dataset first, then an individual market/contract/model/window/session cohort. Each cohort is tested separately; records are never combined across datasets or markets. Read-only; no records are changed.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><select id="dspCompatibilityDataset" aria-label="Filter by dataset" style="flex:1;min-width:150px;padding:9px;background:#081522;color:#eaf2fb;border:1px solid #35506a;border-radius:8px"><option value="">Refresh cohorts first</option></select><select id="dspCompatibilityCohort" aria-label="Individual market comparison cohort" style="flex:2;min-width:230px;padding:9px;background:#081522;color:#eaf2fb;border:1px solid #35506a;border-radius:8px"><option value="">Refresh cohorts first</option></select><button id="dspCompatibilityRefresh" type="button" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Refresh cohorts</button><button id="dspCompatibilityRun" type="button" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run compatibility gate</button></div><p id="dspCompatibilityCounts" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Dataset and market cohort counts will appear after refresh.</p><p id="dspCompatibilityResult" role="status" aria-live="polite" style="font-size:11px;white-space:pre-line;color:#ffc477;margin:8px 0 0">NOT RUN — performance comparison remains disabled.</p></div><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">Waiting for DS-02/DS-03 runtime evaluations and a DS-04 replay snapshot. These are session diagnostics, not saved-data counts.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
-      const datasetSelect=panel.querySelector("#dspCompatibilityDataset");
+        '<div style="margin-top:14px;padding:12px;background:#0a1725;border:1px solid #35506a;border-radius:10px"><strong style="font-size:13px">Live sample compatibility gate</strong><p style="font-size:11px;color:#9db0c4;margin:6px 0">Select a dataset first, then an individual market/contract/model/window/session cohort. Each cohort is tested separately; records are never combined across datasets or markets. Read-only; no records are changed.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><div id="dspCompatibilityDatasets" role="group" aria-label="Choose dataset" style="display:flex;gap:6px;flex-wrap:wrap;width:100%"><button type="button" data-dataset="" aria-pressed="true" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">All datasets</button><span style="font-size:11px;color:#9db0c4;align-self:center">Refresh cohorts to load DS-05, DS-06 and DS-07.</span></div><select id="dspCompatibilityCohort" aria-label="Individual market comparison cohort" style="flex:2;min-width:230px;padding:9px;background:#081522;color:#eaf2fb;border:1px solid #35506a;border-radius:8px"><option value="">Refresh cohorts first</option></select><button id="dspCompatibilityRefresh" type="button" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Refresh cohorts</button><button id="dspCompatibilityRun" type="button" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run compatibility gate</button></div><p id="dspCompatibilityCounts" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Dataset and market cohort counts will appear after refresh.</p><p id="dspCompatibilityResult" role="status" aria-live="polite" style="font-size:11px;white-space:pre-line;color:#ffc477;margin:8px 0 0">NOT RUN — performance comparison remains disabled.</p></div><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">Waiting for DS-02/DS-03 runtime evaluations and a DS-04 replay snapshot. These are session diagnostics, not saved-data counts.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
+      const datasetButtons=panel.querySelector("#dspCompatibilityDatasets");
       const cohortSelect=panel.querySelector("#dspCompatibilityCohort");
       const cohortRefresh=panel.querySelector("#dspCompatibilityRefresh");
       const cohortRun=panel.querySelector("#dspCompatibilityRun");
@@ -554,9 +554,9 @@
       const cohortCounts=panel.querySelector("#dspCompatibilityCounts");
       let availableCohorts=[];
       let visibleCohorts=[];
+      let activeDatasetId="";
       const renderCohortOptions=()=>{
-        const datasetId=datasetSelect.value;
-        visibleCohorts=availableCohorts.filter(cohort=>!datasetId||cohort.dataset_id===datasetId);
+        visibleCohorts=availableCohorts.filter(cohort=>!activeDatasetId||cohort.dataset_id===activeDatasetId);
         cohortSelect.replaceChildren();
         const grouped=new Map();
         visibleCohorts.forEach((cohort,index)=>{
@@ -579,20 +579,41 @@
           option.value=""; option.textContent="No eligible cohorts for this dataset";
           cohortSelect.appendChild(option);
         }
+        if(datasetButtons){
+          datasetButtons.querySelectorAll("button[data-dataset]").forEach(button=>{
+            const selected=button.dataset.dataset===activeDatasetId;
+            button.setAttribute("aria-pressed",selected?"true":"false");
+            button.style.background=selected?"#17616a":"#18344a";
+            button.style.borderColor=selected?"#52d6df":"#426078";
+          });
+        }
       };
-      if(datasetSelect) datasetSelect.addEventListener("change",renderCohortOptions);
+      if(datasetButtons) datasetButtons.addEventListener("click",event=>{
+        const button=event.target.closest("button[data-dataset]");
+        if(!button||!datasetButtons.contains(button))return;
+        activeDatasetId=button.dataset.dataset||"";
+        renderCohortOptions();
+        cohortResult.textContent=activeDatasetId
+          ? "Selected "+activeDatasetId+". Now choose one market/contract/model/window/session cohort."
+          : "Showing all datasets. Choose a dataset button, then one individual market cohort.";
+      });
       if(cohortRefresh) cohortRefresh.addEventListener("click",()=>{
         availableCohorts=storedComparisonCohorts();
-        datasetSelect.replaceChildren();
-        const all=document.createElement("option");
-        all.value=""; all.textContent="All datasets ("+availableCohorts.length+" cohorts)";
-        datasetSelect.appendChild(all);
+        activeDatasetId="";
+        datasetButtons.replaceChildren();
+        const countsById={};
         ["DS-05","DS-06","DS-07"].forEach(id=>{
-          const count=availableCohorts.filter(cohort=>cohort.dataset_id===id).length;
-          const option=document.createElement("option");
-          option.value=id; option.textContent=id+" ("+count+" cohorts)";
-          datasetSelect.appendChild(option);
+          countsById[id]=availableCohorts.filter(cohort=>cohort.dataset_id===id).length;
         });
+        const addDatasetButton=(id,label,count)=>{
+          const button=document.createElement("button");
+          button.type="button";button.dataset.dataset=id;button.setAttribute("aria-pressed",id===""?"true":"false");
+          button.textContent=label+" ("+count+" cohorts)";
+          button.style.cssText="padding:9px 12px;background:"+(id===""?"#17616a":"#18344a")+";border:1px solid "+(id===""?"#52d6df":"#426078")+";border-radius:8px;color:#eaf2fb";
+          datasetButtons.appendChild(button);
+        };
+        addDatasetButton("","All datasets",availableCohorts.length);
+        ["DS-05","DS-06","DS-07"].forEach(id=>addDatasetButton(id,id,countsById[id]));
         renderCohortOptions();
         const summaries=["DS-05","DS-06","DS-07"].map(id=>{
           const rows=availableCohorts.filter(cohort=>cohort.dataset_id===id);
@@ -601,7 +622,7 @@
         });
         cohortCounts.textContent=summaries.join(" · ");
         cohortResult.textContent=availableCohorts.length
-          ? "Loaded "+availableCohorts.length+" exact, complete-provenance cohorts. Choose a dataset and one market cohort, then run the gate."
+          ? "Loaded "+availableCohorts.length+" exact, complete-provenance cohorts. Tap a dataset button above, then choose one market cohort."
           : "NO ELIGIBLE COHORTS — no complete, session-scoped saved cohort has at least two outcomes. Audit counts do not guarantee two records in the same exact session/model/window cohort.";
       });
       if(cohortRun) cohortRun.addEventListener("click",()=>{
