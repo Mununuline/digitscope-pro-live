@@ -102,5 +102,31 @@
       status: incomplete || duplicates ? "INVALID — PERFORMANCE COMPARISON DISABLED" : "METADATA CHECKS PASSED — COMPATIBILITY STILL REQUIRED" };
   }
 
+
+  if (typeof document !== "undefined") {
+    const installPanel = () => {
+      if (document.getElementById("dspDataIntegrity")) return;
+      const main = document.querySelector("main");
+      if (!main) return;
+      const panel = document.createElement("section");
+      panel.id = "dspDataIntegrity";
+      panel.style.cssText = "margin:14px 0;padding:18px;background:#101d2d;border:1px solid #76552b;border-radius:14px;color:#eaf2fb";
+      const rows = Object.entries(DEFINITIONS).map(([id, d]) =>
+        "<tr><td>"+id+"</td><td>"+d.name+"</td><td>"+d.unit+"</td><td>"+d.sampling+"</td><td>"+(d.derivedFrom || "—")+"</td></tr>"
+      ).join("");
+      panel.innerHTML = '<p style="font-size:10px;letter-spacing:2px;color:#52d6df;font-weight:800">DATA INTEGRITY · VALIDATION SEPARATION</p>' +
+        '<h2 style="font-size:19px;margin:4px 0 8px">Dataset Registry &amp; Provenance Control</h2>' +
+        '<p style="font-size:12px;color:#ffc477;margin:8px 0">INTEGRATION IN PROGRESS — PERFORMANCE COMPARISON DISABLED until each stream emits and reconciles complete provenance.</p>' +
+        '<p style="font-size:11px;color:#9db0c4;margin:8px 0">Registry definitions are installed. Existing stored outcomes are preserved and are not upgraded with invented tick IDs. Legacy records without origin/target IDs remain labelled provenance-incomplete.</p>' +
+        '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
+      const hero = main.querySelector(".hero");
+      if (hero) hero.insertAdjacentElement("afterend", panel);
+      else main.prepend(panel);
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", installPanel, { once: true });
+    else installPanel();
+  }
+
   return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, audit });
 });
