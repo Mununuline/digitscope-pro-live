@@ -355,3 +355,26 @@ test("rolling-overlapping DS-06 samples cannot be labelled independent compariso
   assert.equal(result.compatible,false);
   assert.ok(result.reasons.some(reason=>reason.includes("Rolling-overlapping")));
 });
+
+
+test("every rolling-overlapping dataset design is blocked from independent-sample comparison", () => {
+  const cases = [
+    ["DS-02","DIGIT_MATCH","rolling-most-frequent-v1"],
+    ["DS-03","over_4","empirical-frequency-100-v1"],
+    ["DS-04","MATCH","coldest-digit-replay-v1"],
+    ["DS-06","DIGIT_MATCH","rolling-most-frequent-v1"]
+  ];
+  cases.forEach(([dataset_id,contract,model_id]) => {
+    const make = (origin,target) => ({
+      dataset_id,methodology_version:"1.0.0",market:"R_100",contract,model_id,
+      selected_digit:4,tick_identity_version:"session-v1",
+      forecast_origin_tick_id:"R_100:session-a:"+origin,
+      target_tick_id:"R_100:session-a:"+target,
+      training_window:100,forecast_horizon:3,observed_digit:4,hit:true,
+      scored_at_utc:"2026-11-14T10:00:00Z"
+    });
+    const result=registry.compareSamples([make(10,13)],[make(19,22)]);
+    assert.equal(result.compatible,false,dataset_id+" must remain blocked");
+    assert.ok(result.reasons.some(reason=>reason.includes("Rolling-overlapping")),dataset_id);
+  });
+});
