@@ -105,6 +105,7 @@
       const won=p.contract==="MATCH"?digit===p.digit:digit!==p.digit;
       const arr=p.contract==="MATCH"?r.match:r.differs;
       arr.push({hit:won?1:0,p:p.p,dataset_id:"DS-05",methodology_version:"1.0.0",market:r.symbol,contract:p.contract,model_id:p.contract==="MATCH"?"coldest-digit-v1":"hottest-digit-v1",selected_digit:p.digit,forecast_origin_tick_id:p.originTickId||null,target_tick_id:tickId||null,training_window:TRAIN,forecast_horizon:HORIZON,observed_digit:digit,scored_at_utc:new Date().toISOString()});
+      if(window.DigitScopeDatasetRegistry)window.DigitScopeDatasetRegistry.ingest(arr[arr.length-1]);
       if(arr.length>MAX)arr.shift();
     });
     r.pending=remain;
