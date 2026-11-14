@@ -10,7 +10,7 @@
   "scripts": {
     "prestart": "npm run check",
     "start": "node build.js && node server.js",
-    "check": "node --check server.js && node --check build.js && npm run test:registry",
+    "check": "node --check server.js && node --check build.js && node --check public/scanner.js && node --check public/dataset-registry.js && node --check public/match-decision.js && node --check public/rolling-performance.js && node --check public/statistical-reliability.js && npm run test:registry",
     "test:registry": "node --test tests/dataset-registry.test.js"
   },
   "dependencies": {
