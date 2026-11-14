@@ -281,7 +281,7 @@
         if(!result.available){output.textContent=result.status;return;}
         output.innerHTML=result.streams.map(s=>"<b>"+s.dataset_id+"</b> · "+s.storage_status+" · stored "+s.storedRecords+
           " · complete "+s.provenanceComplete+" · legacy/incomplete "+s.legacyIncomplete+" · malformed "+s.malformed+
-          " · unique targets "+s.uniqueTargets+" · duplicate keys "+s.duplicates).join("<br>")+
+          " · dashboard-loaded "+s.dashboardLoadedRecords+" · excluded "+s.excludedFromDashboard+" · over-cap "+s.overCapRecords+" · unique targets "+s.uniqueTargets+" · duplicate keys "+s.duplicates).join("<br>")+
           "<br><b>Cross-stream shared market/target ticks:</b> "+result.crossStreamTargetOverlap+
           "<br><b>"+result.status+"</b>";
       });
