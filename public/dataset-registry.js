@@ -21,7 +21,7 @@
     "DS-08": { name: "Market Evidence & Holdout", kind: "evaluation_view", unit: "view_of_DS-06_outcomes", sampling: "chronological_split_of_DS-06", horizon: 3, baseline: 0.10, independent: false, derivedFrom: "DS-06" }
   });
 
-  const REQUIRED = ["dataset_id", "methodology_version", "market", "contract", "model_id",
+  const runtimeRecords = [];\n  const REQUIRED = ["dataset_id", "methodology_version", "market", "contract", "model_id",
     "forecast_origin_tick_id", "target_tick_id", "training_window", "forecast_horizon",
     "observed_digit", "hit", "scored_at_utc"];
 
@@ -75,6 +75,20 @@
       reasons: ["Still verify market, contract, model, horizon, training window, and target-tick overlap."] };
   }
 
+  function ingest(record) {
+    const result = validate(record);
+    runtimeRecords.push(result.record);
+    if (runtimeRecords.length > 20000) runtimeRecords.shift();
+    const summary = audit(runtimeRecords);
+    if (typeof document !== "undefined") {
+      const node = document.getElementById("dspRegistryRuntime");
+      if (node) node.textContent = summary.records + " new outcomes observed this page session · " +
+        summary.incomplete + " provenance-incomplete · " + summary.duplicates + " duplicate keys · " +
+        summary.targetReuse + " reused target-tick comparisons · " + summary.status;
+    }
+    return result;
+  }
+
   function audit(records) {
     const list = Array.isArray(records) ? records : [];
     const seen = new Set(), targets = new Map();
@@ -119,7 +133,7 @@
         '<p style="font-size:12px;color:#ffc477;margin:8px 0">INTEGRATION IN PROGRESS — PERFORMANCE COMPARISON DISABLED until each stream emits and reconciles complete provenance.</p>' +
         '<p style="font-size:11px;color:#9db0c4;margin:8px 0">Registry definitions are installed. Existing stored outcomes are preserved and are not upgraded with invented tick IDs. Legacy records without origin/target IDs remain labelled provenance-incomplete.</p>' +
         '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-        '<p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
+        '<p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">No runtime outcomes registered yet. Existing persisted records are not included in this page-session audit.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
       const hero = main.querySelector(".hero");
       if (hero) hero.insertAdjacentElement("afterend", panel);
       else main.prepend(panel);
@@ -138,5 +152,5 @@
     }
   }
 
-  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, audit });
+  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, audit, ingest, runtimeRecords });
 });
