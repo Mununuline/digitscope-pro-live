@@ -161,7 +161,7 @@
       return;
     }
 
-    scoreDigit(record, digit, data.epoch);
+    scoreDigit(record, digit, data.epoch, data.tickId);
     record.lastTotalTicks = totalTicks;
     save();
     render();
