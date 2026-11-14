@@ -56,13 +56,13 @@
     });
   }
 
-  function consume(r, digit) {
+  function consume(r, digit, tickId) {
     r.seq++;
     const remain = [];
     r.pending.forEach(p => {
       if (p.dueAt > r.seq) remain.push(p);
       else {
-        r.outcomes.push({id:state.nextId++,hit:digit === p.target});
+        r.outcomes.push({id:state.nextId++,hit:digit === p.target,dataset_id:"DS-07",methodology_version:"1.0.0",market:r.symbol,contract:"DIGIT_MATCH",model_id:"rolling-most-frequent-v1",selected_digit:p.target,forecast_origin_tick_id:p.originTickId||null,target_tick_id:tickId||null,training_window:LOOKBACK,forecast_horizon:HORIZON,observed_digit:digit,scored_at_utc:new Date().toISOString()});
         if (r.outcomes.length > MAX) r.outcomes.shift();
       }
     });
@@ -74,7 +74,7 @@
     if (r.digits.length === LOOKBACK && r.seq % HORIZON === 0) {
       const counts = Array(10).fill(0);
       r.digits.forEach(d => counts[d]++);
-      r.pending.push({target:counts.indexOf(Math.max(...counts)),dueAt:r.seq+HORIZON});
+      r.pending.push({target:counts.indexOf(Math.max(...counts)),dueAt:r.seq+HORIZON,originTickId:tickId||null});
     }
   }
 
@@ -91,7 +91,7 @@
     if (r.lastTotalTicks && total !== r.lastTotalTicks+1) {
       r.awaitingSnapshot=true; r.pending=[]; save(); return;
     }
-    consume(r,digit); r.lastTotalTicks=total; save(); render();
+    consume(r,digit,d.tickId); r.lastTotalTicks=total; save(); render();
   }
 
   function onSnapshot(event) {
