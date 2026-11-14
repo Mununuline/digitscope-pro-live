@@ -97,22 +97,22 @@
     const hits=digits.filter(d=>d===digit).length/digits.length;
     return contract==="MATCH"?hits:1-hits;
   }
-  function consume(r,digit){
+  function consume(r,digit,tickId){
     r.seq++;
     const remain=[];
     r.pending.forEach(p=>{
       if(p.due>r.seq){remain.push(p);return;}
       const won=p.contract==="MATCH"?digit===p.digit:digit!==p.digit;
       const arr=p.contract==="MATCH"?r.match:r.differs;
-      arr.push({hit:won?1:0,p:p.p});
+      arr.push({hit:won?1:0,p:p.p,dataset_id:"DS-05",methodology_version:"1.0.0",market:r.symbol,contract:p.contract,model_id:p.contract==="MATCH"?"coldest-digit-v1":"hottest-digit-v1",selected_digit:p.digit,forecast_origin_tick_id:p.originTickId||null,target_tick_id:tickId||null,training_window:TRAIN,forecast_horizon:HORIZON,observed_digit:digit,scored_at_utc:new Date().toISOString()});
       if(arr.length>MAX)arr.shift();
     });
     r.pending=remain;
     r.digits.push(digit);if(r.digits.length>TRAIN)r.digits.shift();
     if(r.digits.length===TRAIN&&r.seq%HORIZON===0){
       const cold=choose(r.digits,"cold"),hot=choose(r.digits,"hot");
-      r.pending.push({contract:"MATCH",digit:cold,p:probability(r.digits,cold,"MATCH"),due:r.seq+HORIZON});
-      r.pending.push({contract:"DIFFERS",digit:hot,p:probability(r.digits,hot,"DIFFERS"),due:r.seq+HORIZON});
+      r.pending.push({contract:"MATCH",digit:cold,p:probability(r.digits,cold,"MATCH"),due:r.seq+HORIZON,originTickId:tickId||null});
+      r.pending.push({contract:"DIFFERS",digit:hot,p:probability(r.digits,hot,"DIFFERS"),due:r.seq+HORIZON,originTickId:tickId||null});
     }
   }
   function onTick(event){
@@ -122,7 +122,7 @@
     if(r.awaiting||!r.lastTotal){return;}
     if(total<=r.lastTotal)return;
     if(total!==r.lastTotal+1){r.awaiting=true;r.pending=[];r.digits=[];r.lastTotal=0;save();return;}
-    consume(r,digit);r.lastTotal=total;save();render();
+    consume(r,digit,d.tickId);r.lastTotal=total;save();render();
   }
   function onSnapshot(event){
     const rows=event.detail&&Array.isArray(event.detail.rows)?event.detail.rows:[];
