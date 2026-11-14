@@ -290,3 +290,34 @@ test("DS-02 and DS-03 runtime summaries remain separated by dataset count unit",
   assert.equal(snapshot.byDataset["DS-02"].incomplete,0);
   assert.equal(snapshot.byDataset["DS-03"].incomplete,0);
 });
+
+
+test("persistent audit separates duplicate groups by provenance completeness", () => {
+  const complete = {dataset_id:"DS-07",methodology_version:"1.0.0",tick_identity_version:"session-v1",
+    market:"R_100",contract:"DIGIT_MATCH",model_id:"rolling-v1",selected_digit:3,
+    forecast_origin_tick_id:"R_100:session-a:10",target_tick_id:"R_100:session-a:13",
+    training_window:100,forecast_horizon:3,observed_digit:3,hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"};
+  const completeConflict={...complete,observed_digit:7,hit:false};
+  const legacy={...complete,forecast_origin_tick_id:"R_100:10",target_tick_id:"R_100:13"};
+  const legacyConflict={...legacy,observed_digit:8,hit:false};
+  const raw=JSON.stringify({version:1,markets:{R_100:{outcomes:[
+    complete,completeConflict,legacy,legacyConflict
+  ]}}});
+  const result=registry.auditPersistentStorage({getItem:key=>
+    key==="digitscopePro.statisticalReliability.v1"?raw:null
+  });
+  const stream=result.streams.find(x=>x.dataset_id==="DS-07");
+  assert.equal(stream.provenanceComplete,2);
+  assert.equal(stream.legacyIncomplete,2);
+  assert.equal(stream.provenanceSplit.complete.duplicateGroups,1);
+  assert.equal(stream.provenanceSplit.complete.duplicateExcessRecords,1);
+  assert.equal(stream.provenanceSplit.complete.conflictingDuplicateExcessRecords,1);
+  assert.equal(stream.provenanceSplit.incomplete.duplicateGroups,1);
+  assert.equal(stream.provenanceSplit.incomplete.duplicateExcessRecords,1);
+  assert.equal(stream.provenanceSplit.incomplete.conflictingDuplicateExcessRecords,1);
+  assert.equal(stream.provenanceSplit.complete.uniqueTargets,1);
+  assert.equal(stream.provenanceSplit.incomplete.uniqueTargets,1);
+  assert.equal(stream.duplicateGroups,2);
+  assert.equal(stream.duplicates,2);
+});
