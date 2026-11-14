@@ -96,30 +96,82 @@
       reasons: ["Still verify market, contract, model, horizon, training window, and target-tick overlap."] };
   }
 
+  function sampleProfile(records) {
+    const rows = Array.isArray(records) ? records : [];
+    const checked = rows.map(validate);
+    const invalidRecords = checked.filter(item => !item.valid).length;
+    const signatures = new Set(checked.map(item => {
+      const r = item.record;
+      return [r.dataset_id,r.methodology_version,r.market,r.contract,r.model_id,
+        r.training_window,r.forecast_horizon].join("|");
+    }));
+    const forecastKeys = new Set();
+    let duplicateForecastKeys = 0;
+    const targets = new Set();
+    const targetCounts = new Map();
+    rows.forEach(row => {
+      const r = createProvenance(row);
+      if (nonEmpty(r.forecast_origin_tick_id) && nonEmpty(r.target_tick_id)) {
+        const key = [r.dataset_id,r.market,r.contract,r.model_id,
+          r.forecast_origin_tick_id,r.target_tick_id].join("|");
+        if (forecastKeys.has(key)) duplicateForecastKeys++;
+        forecastKeys.add(key);
+      }
+      if (nonEmpty(r.market) && nonEmpty(r.target_tick_id)) {
+        const key = r.market + "|" + r.target_tick_id;
+        targets.add(key);
+        targetCounts.set(key,(targetCounts.get(key)||0)+1);
+      }
+    });
+    const repeatedTargets = [...targetCounts.values()].filter(count => count > 1).length;
+    const datasetIds = new Set(checked.map(item => item.record.dataset_id));
+    const datasetId = datasetIds.size === 1 ? [...datasetIds][0] : null;
+    const definition = datasetId ? DEFINITIONS[datasetId] : null;
+    return {
+      records: rows.length, invalidRecords, homogeneousDefinition: signatures.size === 1,
+      signatureCount: signatures.size, duplicateForecastKeys,
+      uniqueTargets: targets.size, repeatedTargetGroups: repeatedTargets,
+      datasetId, sampling: definition ? definition.sampling : null,
+      countUnit: definition ? definition.unit : null,
+      derivedFrom: definition ? definition.derivedFrom || null : null
+    };
+  }
+
   function compareSamples(leftRecords, rightRecords) {
     const left = Array.isArray(leftRecords) ? leftRecords : [];
     const right = Array.isArray(rightRecords) ? rightRecords : [];
     const reasons = [];
-    if (!left.length || !right.length) return { compatible:false, status:"INVALID — EMPTY SAMPLE", reasons:["Both samples must contain records."] };
+    if (!left.length || !right.length) return { compatible:false, status:"INVALID — EMPTY SAMPLE",
+      reasons:["Both samples must contain records."], leftProfile:sampleProfile(left), rightProfile:sampleProfile(right) };
+    const leftProfile = sampleProfile(left), rightProfile = sampleProfile(right);
     const all = left.concat(right);
     const checked = all.map(validate);
     if (checked.some(x => !x.valid)) reasons.push("One or more records have incomplete or invalid provenance.");
+    if (!leftProfile.homogeneousDefinition || !rightProfile.homogeneousDefinition)
+      reasons.push("Each sample must contain one homogeneous dataset/methodology/market/contract/model/window/horizon definition.");
     const ids = new Set(all.map(x => x.dataset_id));
     if (ids.size !== 1) reasons.push("Dataset identities differ; cross-dataset comparison is disabled by default.");
-    if (ids.has("DS-08")) reasons.push("DS-08 is a derived holdout view of DS-06, not an independent dataset.");
+    if (ids.has("DS-08")) reasons.push("DS-08 is a derived chronological view of DS-06, not an independent dataset.");
+    if (leftProfile.duplicateForecastKeys || rightProfile.duplicateForecastKeys)
+      reasons.push("Duplicate forecast identity keys exist inside a sample; resolve record duplication before comparison.");
+    if (leftProfile.sampling !== rightProfile.sampling || leftProfile.countUnit !== rightProfile.countUnit)
+      reasons.push("Sampling design and count unit must match exactly.");
+    if (leftProfile.sampling === "rolling_overlapping")
+      reasons.push("Rolling-overlapping forecasts are dependent; independent-sample performance comparison is disabled pending dependence-aware analysis.");
     const signature = r => [r.dataset_id,r.methodology_version,r.market,r.contract,r.model_id,r.training_window,r.forecast_horizon].join("|");
     const leftKeys = new Set(left.map(signature)), rightKeys = new Set(right.map(signature));
-    if (leftKeys.size !== 1 || rightKeys.size !== 1 || [...leftKeys][0] !== [...rightKeys][0]) {
+    if (leftKeys.size !== 1 || rightKeys.size !== 1 || [...leftKeys][0] !== [...rightKeys][0])
       reasons.push("Market, contract, model, methodology version, training window, and forecast horizon must match exactly.");
-    }
-    const targetSet = records => new Set(records.filter(r => nonEmpty(r.market) && nonEmpty(r.target_tick_id)).map(r => r.market + "|" + r.target_tick_id));
+    const targetSet = records => new Set(records.filter(r => nonEmpty(r.market) && nonEmpty(r.target_tick_id))
+      .map(r => r.market + "|" + r.target_tick_id));
     const lt = targetSet(left), rt = targetSet(right);
     let overlap = 0;
     lt.forEach(key => { if (rt.has(key)) overlap++; });
-    if (overlap) reasons.push(overlap + " unique market/target ticks occur in both samples; inference must account for dependence.");
+    if (overlap) reasons.push(overlap + " unique market/target ticks occur in both samples; samples are not independent.");
     const compatible = reasons.length === 0;
-    return { compatible, status: compatible ? "COMPATIBLE SAMPLE DEFINITIONS" : "INVALID — PERFORMANCE COMPARISON DISABLED",
-      reasons, leftRecords:left.length, rightRecords:right.length, uniqueTargetOverlap:overlap };
+    return { compatible, status: compatible ? "COMPATIBLE NON-OVERLAPPING SAMPLE DEFINITIONS" :
+      "INVALID — PERFORMANCE COMPARISON DISABLED", reasons, leftRecords:left.length,
+      rightRecords:right.length, uniqueTargetOverlap:overlap, leftProfile, rightProfile };
   }
 
   let latestReplayAudit = null;
@@ -472,5 +524,5 @@
     }
   }
 
-  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, compareSamples, audit, auditPersistentStorage, ingest, reportReplay, runtimeSnapshot, runtimeRecords });
+  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, sampleProfile, compareSamples, audit, auditPersistentStorage, ingest, reportReplay, runtimeSnapshot, runtimeRecords });
 });
