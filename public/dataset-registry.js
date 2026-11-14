@@ -317,7 +317,15 @@
           return s.dataset_id+" · "+s.storage_status+" · stored="+s.storedRecords+
             " · complete="+s.provenanceComplete+" · legacy/incomplete="+s.legacyIncomplete+" · malformed="+s.malformed+
             " · dashboard-loaded="+s.dashboardLoadedRecords+" · excluded="+s.excludedFromDashboard+
-            " · over-cap="+s.overCapRecords+" · unique targets="+s.uniqueTargets+" · duplicate keys="+s.duplicates+
+            " · over-cap="+s.overCapRecords+" · unique targets="+s.uniqueTargets+" · duplicate excess rows="+s.duplicates+
+            " · duplicate groups="+(s.duplicateGroups||0)+" · same-result repeats="+(s.identicalDuplicateExcessRecords||0)+
+            " · conflicting-result repeats="+(s.conflictingDuplicateExcessRecords||0)+
+            " · targets with multiple forecast keys="+(s.repeatedTargetGroups||0)+
+            ((s.duplicateExamples||[]).length?"\n  Duplicate examples: "+s.duplicateExamples.map(x=>
+              x.market+"|"+x.contract+"|"+x.model_id+" origin="+x.forecast_origin_tick_id+" target="+x.target_tick_id+
+              " occurrences="+x.occurrences+" "+x.classification).join("; "):"")+
+            ((s.repeatedTargetExamples||[]).length?"\n  Reused-target examples: "+s.repeatedTargetExamples.map(x=>
+              x.market_target+" ("+x.distinctForecastKeys+" forecast keys)").join("; "):"")+
             (buckets?"\n  By market/contract: "+buckets:"");
         }).join("\n")+
           "\nCross-stream shared market/target ticks: "+result.crossStreamTargetOverlap+
