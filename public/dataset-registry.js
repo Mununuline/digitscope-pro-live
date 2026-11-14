@@ -76,6 +76,32 @@
       reasons: ["Still verify market, contract, model, horizon, training window, and target-tick overlap."] };
   }
 
+  function compareSamples(leftRecords, rightRecords) {
+    const left = Array.isArray(leftRecords) ? leftRecords : [];
+    const right = Array.isArray(rightRecords) ? rightRecords : [];
+    const reasons = [];
+    if (!left.length || !right.length) return { compatible:false, status:"INVALID — EMPTY SAMPLE", reasons:["Both samples must contain records."] };
+    const all = left.concat(right);
+    const checked = all.map(validate);
+    if (checked.some(x => !x.valid)) reasons.push("One or more records have incomplete or invalid provenance.");
+    const ids = new Set(all.map(x => x.dataset_id));
+    if (ids.size !== 1) reasons.push("Dataset identities differ; cross-dataset comparison is disabled by default.");
+    if (ids.has("DS-08")) reasons.push("DS-08 is a derived holdout view of DS-06, not an independent dataset.");
+    const signature = r => [r.dataset_id,r.methodology_version,r.market,r.contract,r.model_id,r.training_window,r.forecast_horizon].join("|");
+    const leftKeys = new Set(left.map(signature)), rightKeys = new Set(right.map(signature));
+    if (leftKeys.size !== 1 || rightKeys.size !== 1 || [...leftKeys][0] !== [...rightKeys][0]) {
+      reasons.push("Market, contract, model, methodology version, training window, and forecast horizon must match exactly.");
+    }
+    const targetSet = records => new Set(records.filter(r => nonEmpty(r.market) && nonEmpty(r.target_tick_id)).map(r => r.market + "|" + r.target_tick_id));
+    const lt = targetSet(left), rt = targetSet(right);
+    let overlap = 0;
+    lt.forEach(key => { if (rt.has(key)) overlap++; });
+    if (overlap) reasons.push(overlap + " unique market/target ticks occur in both samples; inference must account for dependence.");
+    const compatible = reasons.length === 0;
+    return { compatible, status: compatible ? "COMPATIBLE SAMPLE DEFINITIONS" : "INVALID — PERFORMANCE COMPARISON DISABLED",
+      reasons, leftRecords:left.length, rightRecords:right.length, uniqueTargetOverlap:overlap };
+  }
+
   function ingest(record) {
     const result = validate(record);
     runtimeRecords.push(result.record);
@@ -153,5 +179,5 @@
     }
   }
 
-  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, audit, ingest, runtimeRecords });
+  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, compareSamples, audit, ingest, runtimeRecords });
 });
