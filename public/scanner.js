@@ -4,14 +4,17 @@
   window.__digitScopeScannerLoaded = true;
 
   const WS_URL = "wss://api.derivws.com/trading/v1/options/ws/public";
-  const MAX_TICKS = 250;
+  const MAX_TICKS = 1000;
   const MIN_SAMPLE = 100;
   let ws = null;
   let markets = [];
   let samples = Object.create(null);
-  let subscriptionId = null;
+  const subscriptionIds = Object.create(null);
+  const symbolsBySubscriptionId = Object.create(null);
+  const totalTicksBySymbol = Object.create(null);
   let reconnectTimer = null;
   let renderTimer = null;
+  let pingTimer = null;
   let requestId = 700;
 
   const nextId = () => ++requestId;
@@ -58,7 +61,7 @@
           <tbody id="dspScannerRows"><tr><td colspan="8">Waiting for market list…</td></tr></tbody>
         </table>
       </div>
-      <p class="dsp-note">Ranking uses the chi-square deviation of the latest 250 digits from an even 0–9 distribution. A higher score means a more uneven recent sample, not a prediction or proven trading edge. Markets enter the ranking after 100 live ticks.</p>
+      <p class="dsp-note">Ranking uses the chi-square deviation of the latest 1,000 digits from an even 0–9 distribution. A higher score means a more uneven recent sample, not a prediction or proven trading edge. Markets enter the ranking after 100 live ticks.</p>
     `;
     hero.insertAdjacentElement("afterend", panel);
   }
@@ -87,6 +90,13 @@
     }
 
     ws.onopen = () => {
+      // Keep the Deriv socket alive through mobile-network/proxy idle timeouts.
+      clearInterval(pingTimer);
+      pingTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ ping: 1, req_id: nextId() }));
+        }
+      }, 25000);
       status("Connected. Discovering all Volatility indices…", true);
       ws.send(JSON.stringify({ active_symbols: "brief", req_id: nextId() }));
     };
@@ -108,7 +118,8 @@
         })).filter(item => item.symbol);
 
         markets.sort((a,b) => a.name.localeCompare(b.name));
-        samples = Object.create(null);
+        // Keep the rolling samples if this is a reconnect. Clearing them here
+        // makes every short network interruption send all markets back to zero.
         draw();
 
         if (!markets.length) {
@@ -117,32 +128,51 @@
         }
 
         status("Found " + markets.length + " Volatility markets. Starting one combined live subscription…", true);
-        ws.send(JSON.stringify({
-          ticks: markets.map(item => item.symbol),
-          subscribe: 1,
-          req_id: nextId()
-        }));
+        // Use one subscription per symbol. Deriv may omit tick.symbol from
+        // streamed responses, so echo_req.ticks provides an unambiguous fallback.
+        markets.forEach(item => {
+          ws.send(JSON.stringify({
+            ticks: item.symbol,
+            subscribe: 1,
+            req_id: nextId()
+          }));
+        });
         return;
       }
 
       if (data.msg_type === "tick" || data.tick) {
-        receiveTick(data.tick, data.subscription);
+        receiveTick(data.tick, data.subscription, data.echo_req);
       }
     };
 
     ws.onerror = () => status("Scanner connection error. Retrying…");
     ws.onclose = () => {
-      subscriptionId = null;
+      clearInterval(pingTimer);
+      pingTimer = null;
+      Object.keys(subscriptionIds).forEach(key => delete subscriptionIds[key]);
+      Object.keys(symbolsBySubscriptionId).forEach(key => delete symbolsBySubscriptionId[key]);
       status("Scanner disconnected. Reconnecting…");
       reconnectTimer = setTimeout(openConnection, 3000);
     };
   }
 
-  function receiveTick(tick, subscription) {
-    if (!tick || !tick.symbol || !Number.isFinite(Number(tick.quote))) return;
-    if (subscription && subscription.id) subscriptionId = subscription.id;
-
-    const symbol = String(tick.symbol);
+  function receiveTick(tick, subscription, echoReq) {
+    if (!tick || !Number.isFinite(Number(tick.quote))) return;
+    const echoedSymbol = typeof echoReq?.ticks === "string" ? echoReq.ticks : "";
+    const subscriptionId = subscription?.id == null ? "" : String(subscription.id);
+    // Some streaming updates omit tick.symbol and echo_req.ticks. Resolve those
+    // updates through the subscription ID learned from the initial response.
+    const symbol = String(
+      tick.symbol ||
+      echoedSymbol ||
+      (subscriptionId ? symbolsBySubscriptionId[subscriptionId] : "") ||
+      ""
+    );
+    if (!symbol) return;
+    if (subscriptionId) {
+      subscriptionIds[symbol] = subscriptionId;
+      symbolsBySubscriptionId[subscriptionId] = symbol;
+    }
     if (!markets.some(item => item.symbol === symbol)) return;
 
     const precision = Number.isInteger(Number(tick.pip_size)) ? Number(tick.pip_size) : 2;
@@ -153,10 +183,23 @@
     const list = samples[symbol] || (samples[symbol] = []);
     const epoch = Number(tick.epoch) || 0;
     const quote = Number(tick.quote);
-    const previous = list[list.length - 1];
-    if (previous && previous.epoch === epoch && previous.quote === quote) return;
+    // Deriv tick.id can identify the subscription stream, not a unique tick.
+    // Do not use it to deduplicate: that would discard every update after the first.
     list.push({ digit: Number(last), epoch, quote });
+    totalTicksBySymbol[symbol] = (totalTicksBySymbol[symbol] || 0) + 1;
     if (list.length > MAX_TICKS) list.shift();
+
+    const marketInfo = markets.find(item => item.symbol === symbol);
+    window.dispatchEvent(new CustomEvent("dsp:tick-observation", {
+      detail: {
+        symbol,
+        name: marketInfo ? marketInfo.name : symbol,
+        digit: Number(last),
+        quote,
+        epoch,
+        totalTicks: totalTicksBySymbol[symbol]
+      }
+    }));
 
     if (!renderTimer) {
       renderTimer = setTimeout(() => {
@@ -192,10 +235,25 @@
 
     const qualified = rows.filter(row => row.score !== null).length;
     if (markets.length) {
-      status(subscriptionId
+      status(Object.keys(subscriptionIds).length
         ? "Live scanner running · " + qualified + "/" + rows.length + " markets ranked"
-        : "Receiving market list · waiting for first live ticks", !!subscriptionId);
+        : "Receiving market list · waiting for first live ticks", Object.keys(subscriptionIds).length > 0);
     }
+
+    // Publish the market data independently of whether the scanner table
+    // exists or can be rendered. Analytics modules consume this event.
+    window.dispatchEvent(new CustomEvent("dsp:market-snapshot", {
+      detail: {
+        rows: rows.map(row => ({
+          symbol: row.symbol,
+          name: row.name,
+          n: row.n,
+          counts: row.counts.slice(),
+          digits: (samples[row.symbol] || []).map(tick => tick.digit),
+          totalTicks: totalTicksBySymbol[row.symbol] || 0
+        }))
+      }
+    }));
 
     const tbody = document.getElementById("dspScannerRows");
     if (!tbody) return;
@@ -208,16 +266,6 @@
         <td>${row.score === null ? "Need " + (MIN_SAMPLE-row.n) + " ticks" : "Ranked"}</td>
       </tr>
     `).join("");
-    window.dispatchEvent(new CustomEvent("dsp:market-snapshot", {
-  detail: {
-    rows: rows.map(row => ({
-      symbol: row.symbol,
-      name: row.name,
-      n: row.n,
-      counts: row.counts.slice()
-    }))
-  }
-}));
   }
 
   installPanel();
