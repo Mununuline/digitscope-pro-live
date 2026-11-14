@@ -36,6 +36,8 @@ function App(){
     let subscriptionId=null;
     let didSubscribe=false;
     const marketSeen=seenIds.current[market]||(seenIds.current[market]=new Set());
+    setTicksByMarket(previous=>({...previous,[market]:[]}));
+    setUpdatedAt(null);
 
     function cleanupSocket(){
       if(reconnectTimer)clearTimeout(reconnectTimer);
@@ -102,16 +104,9 @@ function App(){
             setMessage("A quote could not be interpreted at the supplied precision; it was not counted.");
             return;
           }
-          if(normalized.id!==null){
-            if(marketSeen.has(normalized.id)){
-              setDuplicateCount(value=>value+1);
-              return;
-            }
-            marketSeen.add(normalized.id);
-            if(marketSeen.size>5000){
-              const first=marketSeen.values().next().value;
-              marketSeen.delete(first);
-            }
+          if(!window.DigitAnalysis.rememberTickId(marketSeen,normalized.id)){
+            setDuplicateCount(value=>value+1);
+            return;
           }
           setPrecision(previous=>({...previous,[market]:pip}));
           setTicksByMarket(previous=>{
