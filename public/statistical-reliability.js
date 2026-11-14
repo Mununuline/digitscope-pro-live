@@ -114,7 +114,7 @@
         r.digits=digits.slice(-LOOKBACK); r.seq=total; r.lastTotalTicks=total;
         r.pending=[]; changed=true; return;
       }
-      digits.slice(-gap).forEach(d=>consume(r,d));
+      const missingDigits=digits.slice(-gap),missingIds=Array.isArray(row.tickIds)?row.tickIds.slice(-gap):[];missingDigits.forEach((d,i)=>consume(r,d,missingIds[i]||null));
       r.lastTotalTicks=total; changed=true;
     });
     if(changed){save();render();}
