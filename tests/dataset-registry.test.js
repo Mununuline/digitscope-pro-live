@@ -380,6 +380,49 @@ test("every rolling-overlapping dataset design is blocked from independent-sampl
 });
 
 
+test("saved cohort gate builds exact single-session chronological partitions and blocks rolling designs", () => {
+  const make = (dataset_id, sequence, contract="DIGIT_MATCH") => ({
+    dataset_id, methodology_version:"1.0.0", tick_identity_version:"session-v1",
+    market:"R_100", contract, model_id:"rolling-most-frequent-v1", selected_digit:4,
+    forecast_origin_tick_id:"R_100:session-gate:"+String(sequence-3),
+    target_tick_id:"R_100:session-gate:"+String(sequence),
+    training_window:100, forecast_horizon:3, observed_digit:4, hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"
+  });
+  const saved = {
+    "digitscopePro.statisticalReliability.v1": JSON.stringify({version:1,markets:{R_100:{outcomes:[
+      make("DS-07",13),make("DS-07",16),make("DS-07",19),make("DS-07",22)
+    ]}}}),
+    "digitscopePro.rollingValidation.v1": JSON.stringify({version:1,markets:{R_100:{outcomes:[
+      make("DS-06",13),make("DS-06",16),make("DS-06",19),make("DS-06",22)
+    ]}}})
+  };
+  const cohorts=registry.storedComparisonCohorts({getItem:key=>saved[key]||null});
+  const ds07=cohorts.find(x=>x.dataset_id==="DS-07");
+  const ds06=cohorts.find(x=>x.dataset_id==="DS-06");
+  assert.ok(ds07);
+  assert.equal(ds07.left.length,2);
+  assert.equal(ds07.right.length,2);
+  assert.equal(ds07.check.compatible,true);
+  assert.equal(ds07.check.leftProfile.sessionCount,1);
+  assert.ok(ds06);
+  assert.equal(ds06.check.compatible,false);
+  assert.ok(ds06.check.reasons.some(reason=>reason.includes("Rolling-overlapping")));
+});
+
+test("sample profile reports session and identity-version consistency", () => {
+  const make = sequence => ({
+    dataset_id:"DS-07",methodology_version:"1.0.0",tick_identity_version:"session-v1",
+    market:"R_100",contract:"DIGIT_MATCH",model_id:"rolling-most-frequent-v1",
+    forecast_origin_tick_id:"R_100:session-one:"+String(sequence-3),
+    target_tick_id:"R_100:session-one:"+String(sequence),training_window:100,
+    forecast_horizon:3,observed_digit:4,hit:true,scored_at_utc:"2026-11-14T10:00:00Z"
+  });
+  const profile=registry.sampleProfile([make(13),make(16)]);
+  assert.equal(profile.sessionCount,1);
+  assert.equal(profile.identityVersionCount,1);
+});
+
 test("every-third-tick samples reject repeated target ticks within either partition", () => {
   const make = (origin,target) => ({
     dataset_id:"DS-07",methodology_version:"1.0.0",market:"R_100",contract:"DIGIT_MATCH",
