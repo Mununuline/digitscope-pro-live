@@ -118,9 +118,11 @@
     return contract === "MATCH" ? matchProbability : 1 - matchProbability;
   }
 
-  function replay(digits, windowSize, mode, contract, tickIds) {
-    let tested = 0, hits = 0, brier = 0, baselineBrier = 0, probabilityTotal = 0, provenanceComplete = 0;
+  function replay(digits, windowSize, mode, contract, tickIds, marketSymbol) {
+    let tested = 0, hits = 0, brier = 0, baselineBrier = 0, probabilityTotal = 0;
+    const provenanceRows = [];
     const baseline = contract === "MATCH" ? 0.1 : 0.9;
+    const modelId = (mode === "cold" ? "coldest" : "hottest") + "-digit-replay-v1";
     for (let i = windowSize; i + (HORIZON - 1) < digits.length; i += 1) {
       const training = digits.slice(i - windowSize, i);
       const target = chooseDigit(training, mode);
@@ -133,9 +135,21 @@
       probabilityTotal += p;
       brier += Math.pow(p - actual, 2);
       baselineBrier += Math.pow(baseline - actual, 2);
-      if (tickIds && tickIds[i - 1] && tickIds[i + HORIZON - 1]) provenanceComplete += 1;
+      provenanceRows.push({
+        dataset_id:"DS-04",methodology_version:"1.0.0",tick_identity_version:"session-v1",
+        market:marketSymbol,contract,model_id:modelId,selected_digit:target,
+        forecast_origin_tick_id:tickIds && tickIds[i - 1] || null,
+        target_tick_id:tickIds && tickIds[i + HORIZON - 1] || null,
+        training_window:windowSize,forecast_horizon:HORIZON,observed_digit:outcomeDigit,
+        hit:won,scored_at_utc:new Date().toISOString()
+      });
     }
-    return { tested, hits, brier, baselineBrier, probabilityTotal, baseline, provenanceComplete };
+    const replayAudit = window.DigitScopeDatasetRegistry &&
+      typeof window.DigitScopeDatasetRegistry.reportReplay === "function"
+      ? window.DigitScopeDatasetRegistry.reportReplay(provenanceRows) : null;
+    return { tested, hits, brier, baselineBrier, probabilityTotal, baseline,
+      provenanceComplete:replayAudit ? replayAudit.complete : 0,
+      provenanceRows, replayAudit };
   }
 
   function populateMarkets() {
@@ -161,7 +175,9 @@
     }
 
     const digits = market.digits.filter(d => Number.isInteger(d) && d >= 0 && d <= 9).slice(-MAX_SAMPLE);
-    const tickIds = Array.isArray(market.tickIds) ? market.tickIds.slice(-digits.length) : [];
+    const tickIds = Array.isArray(market.tickIds) && market.tickIds.length === market.digits.length
+      ? market.tickIds.filter((id, index) => Number.isInteger(market.digits[index]) && market.digits[index] >= 0 && market.digits[index] <= 9).slice(-digits.length)
+      : [];
     const windowSize = Number($("dmlWindow").value);
     const mode = $("dmlStrategy").value;
     const contract = $("dmlContract").value;
@@ -196,7 +212,7 @@
         " versus a " + pct(baseline, 1) + " fair baseline. This is a historical-frequency estimate, not a calibrated forecast.";
     }
 
-    const result = replay(digits, windowSize, mode, contract, tickIds);
+    const result = replay(digits, windowSize, mode, contract, tickIds, market.symbol);
     const interval = wilson(result.hits, result.tested);
     const skill = result.tested && result.baselineBrier > 0
       ? 1 - result.brier / result.baselineBrier : null;
