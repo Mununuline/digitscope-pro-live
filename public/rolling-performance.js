@@ -111,6 +111,7 @@
             training_window: LOOKBACK, forecast_horizon: HORIZON, observed_digit: actual,
             scored_at_utc: new Date().toISOString()
           });
+          if (window.DigitScopeDatasetRegistry) window.DigitScopeDatasetRegistry.ingest(record.outcomes[record.outcomes.length - 1]);
           if (record.outcomes.length > MAX_OUTCOMES_PER_MARKET) {
             record.outcomes.shift();
           }
