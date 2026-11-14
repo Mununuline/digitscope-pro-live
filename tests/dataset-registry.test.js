@@ -321,3 +321,37 @@ test("persistent audit separates duplicate groups by provenance completeness", (
   assert.equal(stream.duplicateGroups,2);
   assert.equal(stream.duplicates,2);
 });
+
+
+test("sample compatibility reports count unit, sampling design and within-sample integrity", () => {
+  const make = (target, origin, extra={}) => ({
+    dataset_id:"DS-07", methodology_version:"1.0.0", market:"R_100", contract:"DIGIT_MATCH",
+    model_id:"rolling-most-frequent-v1", selected_digit:4, tick_identity_version:"session-v1",
+    forecast_origin_tick_id:"R_100:session-a:"+origin, target_tick_id:"R_100:session-a:"+target,
+    training_window:100, forecast_horizon:3, observed_digit:4, hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z", ...extra
+  });
+  const left=[make(13,10),make(16,13)];
+  const right=[make(22,19),make(25,22)];
+  const result=registry.compareSamples(left,right);
+  assert.equal(result.compatible,true);
+  assert.equal(result.leftProfile.countUnit,"settled_forecast");
+  assert.equal(result.leftProfile.sampling,"every_third_tick");
+  assert.equal(result.leftProfile.uniqueTargets,2);
+  const duplicate=registry.compareSamples([left[0],left[0]],[right[0]]);
+  assert.equal(duplicate.compatible,false);
+  assert.ok(duplicate.reasons.some(reason=>reason.includes("Duplicate forecast identity")));
+});
+
+test("rolling-overlapping DS-06 samples cannot be labelled independent comparisons", () => {
+  const make = (origin, target) => ({
+    dataset_id:"DS-06", methodology_version:"1.0.0", market:"R_100", contract:"DIGIT_MATCH",
+    model_id:"rolling-most-frequent-v1", selected_digit:4, tick_identity_version:"session-v1",
+    forecast_origin_tick_id:"R_100:session-a:"+origin, target_tick_id:"R_100:session-a:"+target,
+    training_window:100, forecast_horizon:3, observed_digit:4, hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"
+  });
+  const result=registry.compareSamples([make(10,13)],[make(13,16)]);
+  assert.equal(result.compatible,false);
+  assert.ok(result.reasons.some(reason=>reason.includes("Rolling-overlapping")));
+});
