@@ -63,3 +63,67 @@ test("sample comparison blocks shared target ticks", () => {
   assert.equal(result.compatible, false);
   assert.equal(result.uniqueTargetOverlap, 1);
 });
+
+
+test("persistent audit reads legacy and complete records without mutating storage", () => {
+  const complete = {
+    dataset_id:"DS-07", methodology_version:"1.0.0", market:"R_100", contract:"DIGIT_MATCH",
+    model_id:"rolling-most-frequent-v1", selected_digit:4, forecast_origin_tick_id:"o1",
+    target_tick_id:"t4", training_window:100, forecast_horizon:3, observed_digit:4,
+    hit:true, scored_at_utc:"2026-11-14T10:00:00Z"
+  };
+  const legacy = { hit:true, target:4, actual:4 };
+  const saved = {
+    "digitscopePro.matchDecision.v1": JSON.stringify({version:1,markets:{R_100:{match:[
+      {...complete,dataset_id:"DS-05",hit:1,contract:"MATCH",model_id:"coldest-digit-v1"},
+      legacy
+    ],differs:[]}}}),
+    "digitscopePro.rollingValidation.v1": JSON.stringify({version:1,markets:{R_100:{outcomes:[legacy]}}}),
+    "digitscopePro.statisticalReliability.v1": JSON.stringify({version:1,markets:{R_100:{outcomes:[complete]}}})
+  };
+  const before = JSON.stringify(saved);
+  const storage = { getItem(key) { return Object.prototype.hasOwnProperty.call(saved,key) ? saved[key] : null; } };
+  const result = registry.auditPersistentStorage(storage);
+  assert.equal(result.available,true);
+  assert.equal(result.streams[0].storedRecords,2);
+  assert.equal(result.streams[0].provenanceComplete,1);
+  assert.equal(result.streams[0].legacyIncomplete,1);
+  assert.equal(result.streams[2].provenanceComplete,1);
+  assert.equal(JSON.stringify(saved),before);
+});
+
+test("persistent audit reports malformed JSON and absent storage keys", () => {
+  const storage = { getItem(key) {
+    if(key==="digitscopePro.matchDecision.v1") return "{broken";
+    return null;
+  }};
+  const result=registry.auditPersistentStorage(storage);
+  assert.equal(result.streams[0].storage_status,"MALFORMED JSON");
+  assert.equal(result.streams[0].malformed,1);
+  assert.equal(result.streams[1].storage_status,"KEY ABSENT");
+  assert.equal(result.streams[2].storage_status,"KEY ABSENT");
+});
+
+test("persistent audit distinguishes unavailable storage", () => {
+  const result=registry.auditPersistentStorage({getItem(){throw new Error("blocked");}});
+  assert.equal(result.available,false);
+  assert.equal(result.status,"STORAGE READ FAILED");
+});
+
+test("persistent audit counts malformed record entries and repeated target keys", () => {
+  const row = {dataset_id:"DS-07",methodology_version:"1",market:"R_100",contract:"DIGIT_MATCH",
+    model_id:"m",forecast_origin_tick_id:"o",target_tick_id:"t",training_window:100,forecast_horizon:3,
+    observed_digit:2,hit:true,scored_at_utc:"2026-11-14T10:00:00Z"};
+  const storage={getItem(key){
+    if(key==="digitscopePro.statisticalReliability.v1")
+      return JSON.stringify({version:1,markets:{R_100:{outcomes:[row,row,null]}}});
+    return null;
+  }};
+  const result=registry.auditPersistentStorage(storage);
+  const stream=result.streams.find(x=>x.dataset_id==="DS-07");
+  assert.equal(stream.storedRecords,3);
+  assert.equal(stream.provenanceComplete,2);
+  assert.equal(stream.malformed,1);
+  assert.equal(stream.duplicates,1);
+  assert.equal(stream.uniqueTargets,1);
+});
