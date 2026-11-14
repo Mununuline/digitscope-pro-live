@@ -17,11 +17,34 @@ test("legacy records remain incomplete when tick provenance is absent", () => {
 test("complete record validates without fabricating identifiers", () => {
   const result = registry.validate({
     dataset_id:"DS-05", methodology_version:"1.0.0", market:"R_100", contract:"MATCH",
-    model_id:"coldest-v1", selected_digit:4, forecast_origin_tick_id:"tick-10",
-    target_tick_id:"tick-13", training_window:100, forecast_horizon:3,
+    model_id:"coldest-v1", selected_digit:4, tick_identity_version:"session-v1",
+    forecast_origin_tick_id:"R_100:session-a:10", target_tick_id:"R_100:session-a:13",
+    training_window:100, forecast_horizon:3,
     observed_digit:4, hit:true, scored_at_utc:"2026-11-14T10:00:00Z"
   });
   assert.equal(result.valid, true);
+});
+
+test("legacy counter-only tick IDs are not treated as globally unique provenance", () => {
+  const result = registry.validate({
+    dataset_id:"DS-05", methodology_version:"1.0.0", market:"R_100", contract:"MATCH",
+    model_id:"coldest-v1", selected_digit:4, forecast_origin_tick_id:"R_100:10",
+    target_tick_id:"R_100:13", training_window:100, forecast_horizon:3,
+    observed_digit:4, hit:true, scored_at_utc:"2026-11-14T10:00:00Z"
+  });
+  assert.equal(result.valid,false);
+  assert.ok(result.missing.includes("tick_identity_version"));
+});
+
+test("session-scoped tick IDs must share a session and match the forecast horizon", () => {
+  const base = {dataset_id:"DS-07",methodology_version:"1.0.0",tick_identity_version:"session-v1",
+    market:"R_100",contract:"DIGIT_MATCH",model_id:"m",selected_digit:4,
+    forecast_origin_tick_id:"R_100:session-a:10",target_tick_id:"R_100:session-a:13",
+    training_window:100,forecast_horizon:3,observed_digit:4,hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"};
+  assert.equal(registry.validate(base).valid,true);
+  assert.ok(registry.validate({...base,target_tick_id:"R_100:session-b:13"}).errors.includes("cross_session_forecast"));
+  assert.ok(registry.validate({...base,target_tick_id:"R_100:session-a:14"}).errors.includes("tick_sequence_horizon_mismatch"));
 });
 
 test("DS-08 is never represented as an independent comparable stream", () => {
