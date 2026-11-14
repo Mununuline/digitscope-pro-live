@@ -24,10 +24,9 @@ test("quote precision does not silently default when missing or invalid",()=>{
   assert.equal(analysis.normalizeTick({quote:12.34,epoch:1},null),null);
 });
 
-test("normalization preserves stable tick identity and formatted quote",()=>{
-  const item=analysis.normalizeTick({id:987,quote:12.3,epoch:1700000000},2);
-  assert.deepEqual(item,{id:"987",quote:12.3,quoteText:"12.30",digit:0,epoch:1700000000});
-  assert.equal(analysis.normalizeTick({tick_id:"abc",quote:12.39,epoch:4},2).id,"abc");
+test("normalization preserves quote and precision without treating subscription IDs as tick IDs",()=>{
+  const item=analysis.normalizeTick({id:"subscription-1",quote:12.3,epoch:1700000000},2);
+  assert.deepEqual(item,{id:null,quote:12.3,quoteText:"12.30",digit:0,epoch:1700000000});
 });
 
 test("distribution counts every digit in the selected recent window",()=>{
@@ -69,14 +68,7 @@ test("invalid digit records are excluded rather than corrupting the denominator"
   assert.equal(result.differs.count,1);
 });
 
-test("stable tick IDs are accepted once and duplicate deliveries are rejected",()=>{
-  const seen=new Set();
-  assert.equal(analysis.rememberTickId(seen,"tick-1"),true);
-  assert.equal(analysis.rememberTickId(seen,"tick-1"),false);
-  assert.equal(analysis.rememberTickId(seen,"tick-2"),true);
-});
-
-test("repeated quote and timestamp observations remain separate when no stable ID exists",()=>{
+test("repeated quote and timestamp observations remain separate",()=>{
   const first=analysis.normalizeTick({quote:12.34,epoch:100},2);
   const second=analysis.normalizeTick({quote:12.34,epoch:100},2);
   assert.equal(first.id,null);
