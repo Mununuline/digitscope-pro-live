@@ -125,7 +125,32 @@ test("persistent audit counts malformed record entries and repeated target keys"
   assert.equal(stream.provenanceComplete,2);
   assert.equal(stream.malformed,1);
   assert.equal(stream.duplicates,1);
+  assert.equal(stream.duplicateGroups,1);
+  assert.equal(stream.identicalDuplicateExcessRecords,1);
+  assert.equal(stream.conflictingDuplicateExcessRecords,0);
+  assert.equal(stream.repeatedTargetGroups,0);
   assert.equal(stream.uniqueTargets,1);
+});
+
+test("persistent audit separates conflicting duplicate keys from repeated targets", () => {
+  const base={dataset_id:"DS-07",methodology_version:"1.0.0",market:"R_100",contract:"DIGIT_MATCH",
+    model_id:"rolling-most-frequent-v1",selected_digit:4,forecast_origin_tick_id:"origin-1",
+    target_tick_id:"target-4",training_window:100,forecast_horizon:3,observed_digit:4,hit:true,
+    scored_at_utc:"2026-11-14T10:00:00Z"};
+  const conflicting={...base,observed_digit:5,hit:false};
+  const secondForecast={...base,forecast_origin_tick_id:"origin-2",selected_digit:2};
+  const raw=JSON.stringify({version:1,markets:{R_100:{outcomes:[base,conflicting,secondForecast]}}});
+  const result=registry.auditPersistentStorage({getItem:key=>
+    key==="digitscopePro.statisticalReliability.v1"?raw:null
+  });
+  const stream=result.streams.find(x=>x.dataset_id==="DS-07");
+  assert.equal(stream.duplicates,1);
+  assert.equal(stream.duplicateGroups,1);
+  assert.equal(stream.identicalDuplicateExcessRecords,0);
+  assert.equal(stream.conflictingDuplicateExcessRecords,1);
+  assert.equal(stream.repeatedTargetGroups,1);
+  assert.equal(stream.repeatedTargetExamples[0].distinctForecastKeys,2);
+  assert.equal(stream.duplicateExamples[0].classification,"CONFLICTING_RESULT");
 });
 
 
