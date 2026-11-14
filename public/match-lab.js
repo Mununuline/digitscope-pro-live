@@ -118,8 +118,8 @@
     return contract === "MATCH" ? matchProbability : 1 - matchProbability;
   }
 
-  function replay(digits, windowSize, mode, contract) {
-    let tested = 0, hits = 0, brier = 0, baselineBrier = 0, probabilityTotal = 0;
+  function replay(digits, windowSize, mode, contract, tickIds) {
+    let tested = 0, hits = 0, brier = 0, baselineBrier = 0, probabilityTotal = 0, provenanceComplete = 0;
     const baseline = contract === "MATCH" ? 0.1 : 0.9;
     for (let i = windowSize; i + (HORIZON - 1) < digits.length; i += 1) {
       const training = digits.slice(i - windowSize, i);
@@ -133,8 +133,9 @@
       probabilityTotal += p;
       brier += Math.pow(p - actual, 2);
       baselineBrier += Math.pow(baseline - actual, 2);
+      if (tickIds && tickIds[i - 1] && tickIds[i + HORIZON - 1]) provenanceComplete += 1;
     }
-    return { tested, hits, brier, baselineBrier, probabilityTotal, baseline };
+    return { tested, hits, brier, baselineBrier, probabilityTotal, baseline, provenanceComplete };
   }
 
   function populateMarkets() {
@@ -159,7 +160,7 @@
       return;
     }
 
-    const digits = market.digits.filter(d => Number.isInteger(d) && d >= 0 && d <= 9).slice(-MAX_SAMPLE);
+    const digits = market.digits.filter(d => Number.isInteger(d) && d >= 0 && d <= 9).slice(-MAX_SAMPLE);\n    const tickIds = Array.isArray(market.tickIds) ? market.tickIds.slice(-digits.length) : [];
     const windowSize = Number($("dmlWindow").value);
     const mode = $("dmlStrategy").value;
     const contract = $("dmlContract").value;
@@ -194,7 +195,7 @@
         " versus a " + pct(baseline, 1) + " fair baseline. This is a historical-frequency estimate, not a calibrated forecast.";
     }
 
-    const result = replay(digits, windowSize, mode, contract);
+    const result = replay(digits, windowSize, mode, contract, tickIds);
     const interval = wilson(result.hits, result.tested);
     const skill = result.tested && result.baselineBrier > 0
       ? 1 - result.brier / result.baselineBrier : null;
@@ -207,7 +208,7 @@
       ? result.tested + " walk-forward forecasts · " + result.hits + " wins · average estimated chance " +
         pct(result.probabilityTotal, result.tested) + " · observed " + pct(result.hits, result.tested) +
         " · 95% Wilson interval " + (interval[0] * 100).toFixed(1) + "–" + (interval[1] * 100).toFixed(1) +
-        "%. Each outcome is exactly the third tick after its forecast origin."
+        "%. Each outcome is exactly the third tick after its forecast origin. Provenance IDs: " + result.provenanceComplete + " / " + result.tested + (result.provenanceComplete === result.tested ? " complete." : " incomplete; this replay must not be compared as a fully identified sample.")
       : "Need at least " + (windowSize + HORIZON) + " live observations to score the first forecast at this training-window size.";
   }
 
