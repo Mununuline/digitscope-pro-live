@@ -107,7 +107,15 @@
     runtimeRecords.push(result.record);
     if (runtimeRecords.length > 20000) runtimeRecords.shift();
     const summary = audit(runtimeRecords);
-  
+    if (typeof document !== "undefined") {
+      const node = document.getElementById("dspRegistryRuntime");
+      if (node) node.textContent = summary.records + " new outcomes observed this page session · " +
+        summary.incomplete + " provenance-incomplete · " + summary.duplicates + " duplicate keys · " +
+        summary.targetReuse + " reused target-tick comparisons · " + summary.status;
+    }
+    return result;
+  }
+
   // Read-only audit of the three persistent validation streams. This function
   // never writes to storage, migrates records, or invents missing identifiers.
   const STORAGE_STREAMS = [
@@ -191,15 +199,6 @@
     });
     const crossStreamTargetOverlap=[...targetSets.values()].filter(s=>s.size>1).length;
     return {available:true,status:"READ ONLY — NO DATA CHANGED",streams,crossStreamTargetOverlap};
-  }
-
-\n  if (typeof document !== "undefined") {
-      const node = document.getElementById("dspRegistryRuntime");
-      if (node) node.textContent = summary.records + " new outcomes observed this page session · " +
-        summary.incomplete + " provenance-incomplete · " + summary.duplicates + " duplicate keys · " +
-        summary.targetReuse + " reused target-tick comparisons · " + summary.status;
-    }
-    return result;
   }
 
   function audit(records) {
