@@ -44,7 +44,7 @@
     if(!Array.isArray(ticks))throw new TypeError("ticks must be an array");
     if(!Number.isInteger(size)||size<1)throw new RangeError("windowSize must be a positive integer");
     if(!Number.isInteger(target)||target<0||target>9)throw new RangeError("selectedDigit must be an integer from 0 to 9");
-    const sample=ticks.slice(-size).filter(item=>item&&Number.isInteger(item.digit)&&item.digit>=0&&item.digit<=9);
+    const sample=ticks.filter(item=>item&&Number.isInteger(item.digit)&&item.digit>=0&&item.digit<=9).slice(-size);
     const total=sample.length;
     const counts=Array(10).fill(0);
     sample.forEach(item=>counts[item.digit]++);
