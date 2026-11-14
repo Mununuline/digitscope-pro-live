@@ -82,7 +82,7 @@
     });
   }
 
-  function scoreDigit(record, digit, epoch) {
+  function scoreDigit(record, digit, epoch, tickId) {
     record.seq += 1;
     const stillPending = [];
     record.pending.forEach(forecast => {
@@ -104,7 +104,12 @@
             observedDigit: actual,
             hit: actual === target,
             epoch: Number(epoch) || 0,
-            outcomeVersion: 2
+            outcomeVersion: 2,
+            dataset_id: "DS-06", methodology_version: "1.0.0", market: record.symbol,
+            contract: "DIGIT_MATCH", model_id: "rolling-most-frequent-v1", selected_digit: target,
+            forecast_origin_tick_id: forecast.originTickId || null, target_tick_id: tickId || null,
+            training_window: LOOKBACK, forecast_horizon: HORIZON, observed_digit: actual,
+            scored_at_utc: new Date().toISOString()
           });
           if (record.outcomes.length > MAX_OUTCOMES_PER_MARKET) {
             record.outcomes.shift();
@@ -121,7 +126,7 @@
       const counts = Array(10).fill(0);
       record.digits.forEach(value => { counts[value] += 1; });
       const target = counts.indexOf(Math.max(...counts));
-      record.pending.push({ target, dueAt: record.seq + HORIZON });
+      record.pending.push({ target, dueAt: record.seq + HORIZON, originTickId: tickId || null });
     }
   }
 
