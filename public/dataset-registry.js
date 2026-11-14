@@ -64,7 +64,7 @@
         const prefix = String(r.market) + ":";
         if (!String(value).startsWith(prefix)) return null;
         const parts = String(value).slice(prefix.length).split(":");
-        if (parts.length !== 2 || !parts[0] || !/^\\d+$/.test(parts[1])) return null;
+        if (parts.length !== 2 || !parts[0] || !/^[0-9]+$/.test(parts[1])) return null;
         const sequence = Number(parts[1]);
         return Number.isSafeInteger(sequence) && sequence > 0 ? { session: parts[0], sequence } : null;
       };
