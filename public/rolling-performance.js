@@ -226,8 +226,16 @@
     return [Math.max(0, center - margin), Math.min(1, center + margin)];
   }
 
+  function isValidatedOutcome(outcome) {
+    return Boolean(window.DigitScopeDatasetRegistry && window.DigitScopeDatasetRegistry.validate(outcome).valid);
+  }
+
+  function validatedOutcomes(record) {
+    return record.outcomes.filter(isValidatedOutcome);
+  }
+
   function summary(records, limit) {
-    const outcomes = records.flatMap(record => record.outcomes)
+    const outcomes = records.flatMap(record => validatedOutcomes(record))
       .sort((a, b) => (a.id || 0) - (b.id || 0));
     const sample = limit ? outcomes.slice(-limit) : outcomes;
     const hits = sample.reduce((sum, outcome) => sum + (outcome.hit ? 1 : 0), 0);
@@ -367,14 +375,16 @@
     document.getElementById("drAllMeta").textContent =
       all.tested.toLocaleString() + " saved trials · " + formatDelta(all.rate) + " vs 10%";
 
-    const active = records.filter(r => r.outcomes.length);
-    const totalSaved = active.reduce((sum, r) => sum + r.outcomes.length, 0);
+    const active = records.filter(r => validatedOutcomes(r).length);
+    const totalSaved = active.reduce((sum, r) => sum + validatedOutcomes(r).length, 0);
+    const legacyCount = records.reduce((sum, r) => sum + r.outcomes.filter(o => !isValidatedOutcome(o)).length, 0);
     document.getElementById("drStatus").textContent =
-      active.length + " markets with saved scored outcomes · " +
-      totalSaved.toLocaleString() + " retained trials · " +
+      active.length + " markets with session-verified outcomes · " +
+      totalSaved.toLocaleString() + " eligible trials · " + legacyCount +
+      " legacy outcomes retained but excluded · " +
       (storageAvailable ? "browser storage active" : "browser storage unavailable");
 
-    const rows = records.filter(r => r.outcomes.length).sort((a,b) => {
+    const rows = active.sort((a,b) => {
       const ar = summary([a], 100).rate ?? -1;
       const br = summary([b], 100).rate ?? -1;
       return br - ar;
@@ -382,7 +392,8 @@
       const s100 = summary([record], 100);
       const s250 = summary([record], 250);
       const s500 = summary([record], 500);
-      const older = record.outcomes.slice(-200, -100);
+      const eligible = validatedOutcomes(record);
+      const older = eligible.slice(-200, -100);
       const olderRate = older.length
         ? older.filter(x => x.hit).length / older.length : null;
       let trend = "Building history";
@@ -396,7 +407,7 @@
         : "—";
       const cls = s100.rate === null ? "" : s100.rate >= BASELINE ? "dr-positive" : "dr-negative";
       return "<tr><td>" + safe(record.name) + "<small>" + safe(record.symbol) + "</small></td>" +
-        "<td>" + record.outcomes.length.toLocaleString() + "</td>" +
+        "<td>" + eligible.length.toLocaleString() + "</td>" +
         "<td class=\"" + cls + "\">" + formatRate(s100.rate) + "</td>" +
         "<td>" + formatRate(s250.rate) + "</td><td>" + formatRate(s500.rate) + "</td>" +
         "<td>" + ci + "</td><td>" + trend + "</td></tr>";
@@ -456,9 +467,9 @@
   }
 
   function adaptiveRender() {
-    const records = Object.values(memory.markets).filter(r => r.outcomes.length);
+    const records = Object.values(memory.markets).filter(r => validatedOutcomes(r).length);
     const rows = records.map(record => {
-      const ordered = record.outcomes.slice().sort((a,b) => (a.id || 0) - (b.id || 0));
+      const ordered = validatedOutcomes(record).slice().sort((a,b) => (a.id || 0) - (b.id || 0));
       const split = Math.floor(ordered.length * 0.6);
       const discovery = adaptiveStats(ordered.slice(0, split));
       const holdoutItems = ordered.slice(split);
