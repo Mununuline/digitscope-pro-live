@@ -28,25 +28,14 @@
     const quoteText=formatQuote(tick.quote,precisionValue);
     const digit=lastDigit(tick.quote,precisionValue);
     if(quoteText===null||digit===null)return null;
-    const rawId=tick.id!==undefined&&tick.id!==null?tick.id:
-      (tick.tick_id!==undefined&&tick.tick_id!==null?tick.tick_id:null);
     const epoch=Number(tick.epoch);
     return {
-      id:rawId===null?null:String(rawId),
+      id:null,
       quote:Number(tick.quote),
       quoteText,
       digit,
       epoch:Number.isFinite(epoch)?epoch:null
     };
-  }
-
-  function rememberTickId(seen,id){
-    if(id===null||id===undefined)return true;
-    const key=String(id);
-    if(seen.has(key))return false;
-    seen.add(key);
-    if(seen.size>5000)seen.delete(seen.values().next().value);
-    return true;
   }
 
   function analyse(ticks,windowSize,selectedDigit){
@@ -72,6 +61,6 @@
     };
   }
 
-  root.DigitAnalysis={readPrecision,formatQuote,lastDigit,normalizeTick,rememberTickId,analyse};
+  root.DigitAnalysis={readPrecision,formatQuote,lastDigit,normalizeTick,analyse};
   if(typeof module!=="undefined"&&module.exports)module.exports=root.DigitAnalysis;
 })(typeof globalThis!=="undefined"?globalThis:this);
