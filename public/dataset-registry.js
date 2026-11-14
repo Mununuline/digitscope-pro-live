@@ -43,7 +43,7 @@
       training_window: source.training_window || null,
       forecast_horizon: source.forecast_horizon === undefined ? null : source.forecast_horizon,
       observed_digit: source.observed_digit === undefined ? null : source.observed_digit,
-      hit: typeof source.hit === "boolean" ? source.hit : null,
+      hit: typeof source.hit === "boolean" ? source.hit : (source.hit === 0 || source.hit === 1 ? Boolean(source.hit) : null),
       scored_at_utc: source.scored_at_utc || null
     };
   }
@@ -107,7 +107,93 @@
     runtimeRecords.push(result.record);
     if (runtimeRecords.length > 20000) runtimeRecords.shift();
     const summary = audit(runtimeRecords);
-    if (typeof document !== "undefined") {
+  
+  // Read-only audit of the three persistent validation streams. This function
+  // never writes to storage, migrates records, or invents missing identifiers.
+  const STORAGE_STREAMS = [
+    { dataset_id:"DS-05", key:"digitscopePro.matchDecision.v1", extract: data => {
+      const out=[]; Object.keys(data.markets||{}).forEach(symbol => {
+        const market=data.markets[symbol]||{};
+        ["match","differs"].forEach(contract => {
+          const rows=market[contract];
+          if(Array.isArray(rows)) rows.forEach(row => out.push(row && typeof row==="object" ? {...row,
+            dataset_id:row.dataset_id||"DS-05", market:row.market||symbol,
+            contract:row.contract||contract.toUpperCase()} : row));
+        });
+      }); return out;
+    }},
+    { dataset_id:"DS-06", key:"digitscopePro.rollingValidation.v1", extract: data => {
+      const out=[]; Object.keys(data.markets||{}).forEach(symbol => {
+        const rows=data.markets[symbol]&&data.markets[symbol].outcomes;
+        if(Array.isArray(rows)) rows.forEach(row => out.push(row && typeof row==="object" ? {...row,
+          dataset_id:row.dataset_id||"DS-06", market:row.market||symbol} : row));
+      }); return out;
+    }},
+    { dataset_id:"DS-07", key:"digitscopePro.statisticalReliability.v1", extract: data => {
+      const out=[]; Object.keys(data.markets||{}).forEach(symbol => {
+        const rows=data.markets[symbol]&&data.markets[symbol].outcomes;
+        if(Array.isArray(rows)) rows.forEach(row => out.push(row && typeof row==="object" ? {...row,
+          dataset_id:row.dataset_id||"DS-07", market:row.market||symbol} : row));
+      }); return out;
+    }}
+  ];
+
+  function auditPersistentStorage(storage) {
+    const source=storage || (typeof localStorage!=="undefined" ? localStorage : null);
+    if(!source) return {available:false,status:"STORAGE UNAVAILABLE",streams:[],crossStreamTargetOverlap:0};
+    const streams=[], all=[];
+    for(const stream of STORAGE_STREAMS) {
+      let raw;
+      try { raw=source.getItem(stream.key); }
+      catch (_) { return {available:false,status:"STORAGE READ FAILED",streams:[],crossStreamTargetOverlap:0}; }
+      if(raw===null) {
+        streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"KEY ABSENT",storedRecords:0,
+          provenanceComplete:0,legacyIncomplete:0,malformed:0,uniqueTargets:0,duplicates:0});
+        continue;
+      }
+      let parsed;
+      try { parsed=JSON.parse(raw); }
+      catch (_) {
+        streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"MALFORMED JSON",storedRecords:0,
+          provenanceComplete:0,legacyIncomplete:0,malformed:1,uniqueTargets:0,duplicates:0});
+        continue;
+      }
+      if(!parsed || parsed.version!==1 || !parsed.markets || typeof parsed.markets!=="object") {
+        streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"UNRECOGNIZED SCHEMA",storedRecords:0,
+          provenanceComplete:0,legacyIncomplete:0,malformed:1,uniqueTargets:0,duplicates:0});
+        continue;
+      }
+      let rows;
+      try { rows=stream.extract(parsed); } catch (_) { rows=[]; }
+      let complete=0,incomplete=0,malformed=0,duplicates=0;
+      const seen=new Set(), targets=new Set();
+      rows.forEach(row => {
+        if(!row || typeof row!=="object" || Array.isArray(row)) { malformed++; return; }
+        const v=validate(row);
+        if(v.valid) complete++; else incomplete++;
+        const key=[row.market||"",row.contract||"",row.model_id||"",row.forecast_origin_tick_id||"",row.target_tick_id||""].join("|");
+        if(nonEmpty(row.forecast_origin_tick_id)&&nonEmpty(row.target_tick_id)) {
+          if(seen.has(key)) duplicates++;
+          seen.add(key);
+        }
+        if(nonEmpty(row.market)&&nonEmpty(row.target_tick_id)) targets.add(row.market+"|"+row.target_tick_id);
+        all.push({dataset_id:stream.dataset_id,market:row.market||"",target_tick_id:row.target_tick_id||null});
+      });
+      streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"READ ONLY · PARSED",
+        storedRecords:rows.length,provenanceComplete:complete,legacyIncomplete:incomplete,
+        malformed,uniqueTargets:targets.size,duplicates});
+    }
+    const targetSets=new Map();
+    all.forEach(row=>{
+      if(!row.target_tick_id)return;
+      const k=row.market+"|"+row.target_tick_id;
+      const s=targetSets.get(k)||new Set(); s.add(row.dataset_id); targetSets.set(k,s);
+    });
+    const crossStreamTargetOverlap=[...targetSets.values()].filter(s=>s.size>1).length;
+    return {available:true,status:"READ ONLY — NO DATA CHANGED",streams,crossStreamTargetOverlap};
+  }
+
+\n  if (typeof document !== "undefined") {
       const node = document.getElementById("dspRegistryRuntime");
       if (node) node.textContent = summary.records + " new outcomes observed this page session · " +
         summary.incomplete + " provenance-incomplete · " + summary.duplicates + " duplicate keys · " +
@@ -160,7 +246,18 @@
         '<p style="font-size:12px;color:#ffc477;margin:8px 0">INTEGRATION IN PROGRESS — PERFORMANCE COMPARISON DISABLED until each stream emits and reconciles complete provenance.</p>' +
         '<p style="font-size:11px;color:#9db0c4;margin:8px 0">Registry definitions are installed. Existing stored outcomes are preserved and are not upgraded with invented tick IDs. Legacy records without origin/target IDs remain labelled provenance-incomplete.</p>' +
         '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-        '<p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">No runtime outcomes registered yet. Existing persisted records are not included in this page-session audit.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
+        '<button id="dspPersistentAuditBtn" type="button" style="margin-top:12px;padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run read-only saved-data audit</button><p id="dspPersistentAudit" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Saved browser records have not been inspected. This audit only reads existing storage.</p><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">No runtime outcomes registered yet. Existing persisted records are not included in this page-session audit.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
+      const auditButton=panel.querySelector("#dspPersistentAuditBtn");
+      if(auditButton) auditButton.addEventListener("click",()=>{
+        const result=auditPersistentStorage();
+        const output=panel.querySelector("#dspPersistentAudit");
+        if(!result.available){output.textContent=result.status;return;}
+        output.innerHTML=result.streams.map(s=>"<b>"+s.dataset_id+"</b> · "+s.storage_status+" · stored "+s.storedRecords+
+          " · complete "+s.provenanceComplete+" · legacy/incomplete "+s.legacyIncomplete+" · malformed "+s.malformed+
+          " · unique targets "+s.uniqueTargets+" · duplicate keys "+s.duplicates).join("<br>")+
+          "<br><b>Cross-stream shared market/target ticks:</b> "+result.crossStreamTargetOverlap+
+          "<br><b>"+result.status+"</b>";
+      });
       const hero = main.querySelector(".hero");
       if (hero) hero.insertAdjacentElement("afterend", panel);
       else main.prepend(panel);
@@ -179,5 +276,5 @@
     }
   }
 
-  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, compareSamples, audit, ingest, runtimeRecords });
+  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, compareSamples, audit, auditPersistentStorage, ingest, runtimeRecords });
 });
