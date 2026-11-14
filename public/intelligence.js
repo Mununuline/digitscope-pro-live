@@ -473,7 +473,8 @@ const label = (strong ? "Strong deviation" : watch ? "Watch" : "Weak") + " · " 
       }
 
       const missingDigits = digits.slice(-gap);
-      missingDigits.forEach(digit => applyValidationDigit(record, digit));
+      const missingIds = Array.isArray(row.tickIds) ? row.tickIds.slice(-gap) : [];
+      missingDigits.forEach((digit, index) => applyValidationDigit(record, digit, missingIds[index] || null));
       record.lastTotalTicks = totalTicks;
     });
     renderValidation();
