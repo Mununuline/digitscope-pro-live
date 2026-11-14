@@ -62,7 +62,7 @@
     r.pending.forEach(p => {
       if (p.dueAt > r.seq) remain.push(p);
       else {
-        r.outcomes.push({id:state.nextId++,hit:digit === p.target,dataset_id:"DS-07",methodology_version:"1.0.0",market:r.symbol,contract:"DIGIT_MATCH",model_id:"rolling-most-frequent-v1",selected_digit:p.target,forecast_origin_tick_id:p.originTickId||null,target_tick_id:tickId||null,training_window:LOOKBACK,forecast_horizon:HORIZON,observed_digit:digit,scored_at_utc:new Date().toISOString()});
+        r.outcomes.push({id:state.nextId++,hit:digit === p.target,dataset_id:"DS-07",methodology_version:"1.0.0",tick_identity_version:"session-v1",market:r.symbol,contract:"DIGIT_MATCH",model_id:"rolling-most-frequent-v1",selected_digit:p.target,forecast_origin_tick_id:p.originTickId||null,target_tick_id:tickId||null,training_window:LOOKBACK,forecast_horizon:HORIZON,observed_digit:digit,scored_at_utc:new Date().toISOString()});
         if (window.DigitScopeDatasetRegistry) window.DigitScopeDatasetRegistry.ingest(r.outcomes[r.outcomes.length-1]);
         if (r.outcomes.length > MAX) r.outcomes.shift();
       }
