@@ -126,6 +126,16 @@
     };
     if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", installPanel, { once: true });
     else installPanel();
+    if (typeof MutationObserver !== "undefined" && document.body) {
+      const observer = new MutationObserver(() => {
+        if (document.querySelector("main") && !document.getElementById("dspDataIntegrity")) {
+          installPanel();
+          if (document.getElementById("dspDataIntegrity")) observer.disconnect();
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      setTimeout(() => observer.disconnect(), 15000);
+    }
   }
 
   return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, audit });
