@@ -144,6 +144,7 @@
       record.brier += score;
       record.baselineBrier += baseScore;
       record.outcomes.push({dataset_id:"DS-03",methodology_version:"1.0.0",market:item.symbol,contract:forecast.contract.key,model_id:"empirical-frequency-100-v1",selected_digit:null,forecast_origin_tick_id:forecast.originTickId||null,target_tick_id:tickId||null,training_window:TRAINING_TICKS,forecast_horizon:FORECAST_HORIZON,observed_digit:digit,hit:observed===1,scored_at_utc:new Date().toISOString()});
+      if(window.DigitScopeDatasetRegistry)window.DigitScopeDatasetRegistry.ingest(record.outcomes[record.outcomes.length-1]);
       if(record.outcomes.length>5000)record.outcomes.shift();
     }
     item.pending = remaining;
