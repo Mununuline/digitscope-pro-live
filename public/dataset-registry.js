@@ -226,7 +226,13 @@
       const s=targetSets.get(k)||new Set(); s.add(row.dataset_id); targetSets.set(k,s);
     });
     const crossStreamTargetOverlap=[...targetSets.values()].filter(s=>s.size>1).length;
-    return {available:true,status:"READ ONLY — NO DATA CHANGED",streams,crossStreamTargetOverlap};
+    const overlapByPair={"DS-05/DS-06":0,"DS-05/DS-07":0,"DS-06/DS-07":0};
+    targetSets.forEach(ids=>{
+      [["DS-05","DS-06"],["DS-05","DS-07"],["DS-06","DS-07"]].forEach(pair=>{
+        if(ids.has(pair[0])&&ids.has(pair[1]))overlapByPair[pair[0]+"/"+pair[1]]++;
+      });
+    });
+    return {available:true,status:"READ ONLY — NO DATA CHANGED",streams,crossStreamTargetOverlap,overlapByPair};
   }
 
   function audit(records) {
@@ -282,7 +288,7 @@
         output.innerHTML=result.streams.map(s=>"<b>"+s.dataset_id+"</b> · "+s.storage_status+" · stored "+s.storedRecords+
           " · complete "+s.provenanceComplete+" · legacy/incomplete "+s.legacyIncomplete+" · malformed "+s.malformed+
           " · dashboard-loaded "+s.dashboardLoadedRecords+" · excluded "+s.excludedFromDashboard+" · over-cap "+s.overCapRecords+" · unique targets "+s.uniqueTargets+" · duplicate keys "+s.duplicates).join("<br>")+
-          "<br><b>Cross-stream shared market/target ticks:</b> "+result.crossStreamTargetOverlap+
+          "<br><b>Cross-stream shared market/target ticks:</b> "+result.crossStreamTargetOverlap+" · "+Object.entries(result.overlapByPair||{}).map(x=>x[0]+": "+x[1]).join(" · ")+
           "<br><b>"+result.status+"</b>";
       });
       const hero = main.querySelector(".hero");
