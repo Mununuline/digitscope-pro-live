@@ -129,7 +129,12 @@
     return z>=0?tail:1-tail;
   }
 
+  function isValidatedOutcome(outcome) {
+    return Boolean(window.DigitScopeDatasetRegistry && window.DigitScopeDatasetRegistry.validate(outcome).valid);
+  }
+
   function stats(outcomes) {
+    outcomes=outcomes.filter(isValidatedOutcome);
     const n=outcomes.length, hits=outcomes.reduce((s,o)=>s+(o.hit?1:0),0);
     const rate=n?hits/n:null;
     if(n<2) return {n,hits,rate,se:null,p:null,lower:null};
@@ -197,8 +202,9 @@
 
   function render() {
     const rows=Object.values(state.markets).map(r=>{
-      const s=stats(r.outcomes), mid=Math.floor(r.outcomes.length/2);
-      const first=stats(r.outcomes.slice(0,mid)), second=stats(r.outcomes.slice(mid));
+      const eligibleOutcomes=r.outcomes.filter(isValidatedOutcome);
+      const s=stats(eligibleOutcomes), mid=Math.floor(eligibleOutcomes.length/2);
+      const first=stats(eligibleOutcomes.slice(0,mid)), second=stats(eligibleOutcomes.slice(mid));
       let stability="Building sample", cls="";
       if(first.n>=30&&second.n>=30){
         const diff=second.rate-first.rate;
@@ -213,8 +219,9 @@
     document.getElementById("d4Markets").textContent=eligible.length;
     document.getElementById("d4Passes").textContent=passes;
     document.getElementById("d4Trials").textContent=total.toLocaleString();
+    const legacyCount=Object.values(state.markets).reduce((n,r)=>n+r.outcomes.filter(o=>!isValidatedOutcome(o)).length,0);
     document.getElementById("d4Status").textContent=
-      "Separate validation stream · every 3rd tick forecast · "+(storageOK?"local persistence active":"local storage unavailable");
+      "Every 3rd tick · "+total.toLocaleString()+" session-verified outcomes eligible · "+legacyCount+" legacy outcomes retained but excluded · "+(storageOK?"local persistence active":"local storage unavailable");
     rows.sort((a,b)=>(b.s.rate??-1)-(a.s.rate??-1));
     document.getElementById("d4Rows").innerHTML=rows.length?rows.map(x=>{
       const pass=x.adjusted!==null&&x.adjusted<0.05&&x.s.lower>BASELINE&&x.stability==="Stable";
