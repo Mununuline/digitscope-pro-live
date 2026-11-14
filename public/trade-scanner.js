@@ -101,7 +101,7 @@
 
   function getStats(symbol, contract) {
     const key = symbol + "|" + contract.key;
-    if (!stats.has(key)) stats.set(key, { tested: 0, events: 0, brier: 0, baselineBrier: 0 });
+    if (!stats.has(key)) stats.set(key, { tested: 0, events: 0, brier: 0, baselineBrier: 0, outcomes: [] });
     return stats.get(key);
   }
 
@@ -128,7 +128,7 @@
     }
   }
 
-  function scoreDueForecasts(item, digit) {
+  function scoreDueForecasts(item, digit, tickId) {
     const remaining = [];
     for (const forecast of item.pending) {
       if (forecast.dueAt > item.seq) {
@@ -143,6 +143,8 @@
       record.events += observed;
       record.brier += score;
       record.baselineBrier += baseScore;
+      record.outcomes.push({dataset_id:"DS-03",methodology_version:"1.0.0",market:item.symbol,contract:forecast.contract.key,model_id:"empirical-frequency-100-v1",selected_digit:null,forecast_origin_tick_id:forecast.originTickId||null,target_tick_id:tickId||null,training_window:TRAINING_TICKS,forecast_horizon:FORECAST_HORIZON,observed_digit:digit,hit:observed===1,scored_at_utc:new Date().toISOString()});
+      if(record.outcomes.length>5000)record.outcomes.shift();
     }
     item.pending = remaining;
   }
@@ -153,6 +155,7 @@
     for (const contract of CONTRACTS) {
       item.pending.push({
         dueAt: item.seq + FORECAST_HORIZON,
+        originTickId: item.currentTickId || null,
         contract,
         p: probability(training, contract)
       });
@@ -168,7 +171,8 @@
 
     const item = getMarket(symbol, data.name || symbol);
     item.seq += 1;
-    scoreDueForecasts(item, digit);
+    item.currentTickId = data.tickId || null;
+    scoreDueForecasts(item, digit, data.tickId);
     // Include the just-observed tick in the 100-tick training window. Since
     // the forecast is issued now, seq + 3 is the third subsequent tick.
     item.digits.push(digit);
