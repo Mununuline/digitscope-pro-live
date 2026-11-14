@@ -158,6 +158,9 @@
       reasons.push("Sampling design and count unit must match exactly.");
     if (leftProfile.sampling && leftProfile.sampling.indexOf("rolling_overlapping") === 0)
       reasons.push("Rolling-overlapping forecasts are dependent; independent-sample performance comparison is disabled pending dependence-aware analysis.");
+    if (leftProfile.sampling === "every_third_tick" &&
+        (leftProfile.repeatedTargetGroups || rightProfile.repeatedTargetGroups))
+      reasons.push("Every-third-tick samples must contain one forecast outcome per target tick; repeated targets block comparison.");
     const signature = r => [r.dataset_id,r.methodology_version,r.market,r.contract,r.model_id,r.training_window,r.forecast_horizon].join("|");
     const leftKeys = new Set(left.map(signature)), rightKeys = new Set(right.map(signature));
     if (leftKeys.size !== 1 || rightKeys.size !== 1 || [...leftKeys][0] !== [...rightKeys][0])
