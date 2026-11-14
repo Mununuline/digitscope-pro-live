@@ -19,7 +19,7 @@
     if(formatted===null)return null;
     const digits=formatted.replace(/[^0-9]/g,"");
     if(!digits)return null;
-    const character=precisionValue===0?digits.slice(-1):formatted.split(".")[1].slice(-1);
+    const character=readPrecision(precisionValue)===0?digits.slice(-1):formatted.split(".")[1].slice(-1);
     return /^\d$/.test(character)?Number(character):null;
   }
 
@@ -38,6 +38,15 @@
       digit,
       epoch:Number.isFinite(epoch)?epoch:null
     };
+  }
+
+  function rememberTickId(seen,id){
+    if(id===null||id===undefined)return true;
+    const key=String(id);
+    if(seen.has(key))return false;
+    seen.add(key);
+    if(seen.size>5000)seen.delete(seen.values().next().value);
+    return true;
   }
 
   function analyse(ticks,windowSize,selectedDigit){
@@ -63,6 +72,6 @@
     };
   }
 
-  root.DigitAnalysis={readPrecision,formatQuote,lastDigit,normalizeTick,analyse};
+  root.DigitAnalysis={readPrecision,formatQuote,lastDigit,normalizeTick,rememberTickId,analyse};
   if(typeof module!=="undefined"&&module.exports)module.exports=root.DigitAnalysis;
 })(typeof globalThis!=="undefined"?globalThis:this);
