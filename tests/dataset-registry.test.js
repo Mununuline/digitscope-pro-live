@@ -435,3 +435,34 @@ test("every-third-tick samples reject repeated target ticks within either partit
   assert.equal(result.compatible,false);
   assert.ok(result.reasons.some(reason=>reason.includes("one forecast outcome per target tick")));
 });
+
+
+test("duplicate reconciliation exposes differing field values and outcome consistency", () => {
+  const base = {
+    dataset_id:"DS-07",methodology_version:"1.0.0",tick_identity_version:"session-v1",
+    market:"R_100",contract:"DIGIT_MATCH",model_id:"rolling-most-frequent-v1",
+    selected_digit:4,forecast_origin_tick_id:"R_100:session-reconcile:10",
+    target_tick_id:"R_100:session-reconcile:13",training_window:100,forecast_horizon:3,
+    observed_digit:4,hit:true,scored_at_utc:"2026-11-14T10:00:00Z"
+  };
+  const conflicting = {...base,observed_digit:7,hit:false};
+  const raw=JSON.stringify({version:1,markets:{R_100:{outcomes:[
+    {...base,id:"record-a"}, {...conflicting,id:"record-b"}
+  ]}}});
+  const result=registry.auditPersistentStorage({getItem:key=>
+    key==="digitscopePro.statisticalReliability.v1"?raw:null
+  });
+  const stream=result.streams.find(x=>x.dataset_id==="DS-07");
+  const example=stream.duplicateExamples.find(x=>x.forecast_origin_tick_id===base.forecast_origin_tick_id);
+  assert.equal(example.classification,"CONFLICTING_RESULT");
+  assert.deepEqual(example.conflicting_fields.sort(),["hit","observed_digit"]);
+  assert.equal(example.observed_digit_agreement,false);
+  assert.equal(example.hit_consistency,false);
+  assert.deepEqual(example.field_differences.find(x=>x.field==="observed_digit").values,[
+    {value:4,occurrences:1},{value:7,occurrences:1}
+  ]);
+  assert.deepEqual(example.field_differences.find(x=>x.field==="hit").values,[
+    {value:true,occurrences:1},{value:false,occurrences:1}
+  ]);
+  assert.deepEqual(example.record_ids,["record-a","record-b"]);
+});
