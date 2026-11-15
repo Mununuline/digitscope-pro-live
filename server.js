@@ -89,7 +89,7 @@ async function fetchDemoAccounts(accessToken) {
 // AI Market Assistant: deterministic eligibility gates always own the decision.
 // An optional language model may explain the supplied evidence, but cannot
 // upgrade WAIT/NO TRADE or place orders.
-const assistantRequests = new Map();
+const assistantRequests = new WeakMap();
 const { evaluateAssistant } = require("./assistant-engine");
 
 app.post("/api/assistant/analyze", async (req, res) => {
