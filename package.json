@@ -10,8 +10,9 @@
   "scripts": {
     "prestart": "npm run check",
     "start": "node build.js && node server.js",
-    "check": "node --check server.js && node --check build.js && node --check public/scanner.js && node --check public/dataset-registry.js && node --check public/intelligence.js && node --check public/trade-scanner.js && node --check public/match-lab.js && node --check public/match-decision.js && node --check public/rolling-performance.js && node --check public/statistical-reliability.js && npm run test:registry",
-    "test:registry": "node --test tests/dataset-registry.test.js"
+    "check": "node --check server.js && node --check assistant-engine.js && node build.js && node --check build.js && node --check public/scanner.js && node --check public/dataset-registry.js && node --check public/intelligence.js && node --check public/trade-scanner.js && node --check public/match-lab.js && node --check public/match-decision.js && node --check public/rolling-performance.js && node --check public/statistical-reliability.js && npm run test:registry && npm run test:assistant",
+    "test:registry": "node --test tests/dataset-registry.test.js",
+    "test:assistant": "node --test tests/assistant-engine.test.js"
   },
   "dependencies": {
     "express": "^4.21.2",
