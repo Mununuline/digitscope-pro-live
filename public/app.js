@@ -244,23 +244,26 @@ if (marketLabel) marketLabel.textContent = $("symbolSelect").selectedOptions[0]?
     if (!Number.isFinite(value)) return null;
     const digit = getDigit(value, precision);
     if (digit === null) return null;
-    return { quote: value, epoch: numberOf(epoch, 0), digit };
+    return { quote: value, epoch: numberOf(epoch, 0), digit, id: null };
   }
 
+  // Preserve every observation: multiple legitimate ticks can share the same
+  // second and quote. Timestamp/quote pairs are not unique tick identifiers.
   function sortedUniqueTicks(items) {
-    const byKey = new Map();
-    items.forEach((item) => {
-      if (!item) return;
-      const key = item.epoch ? `${item.epoch}:${item.quote}` : `noepoch:${item.quote}`;
-      byKey.set(key, item);
-    });
-    return Array.from(byKey.values()).sort((a, b) => a.epoch - b.epoch);
+    return items
+      .map((item, index) => ({ item, index }))
+      .filter(entry => entry.item)
+      .sort((a, b) => a.item.epoch - b.item.epoch || a.index - b.index)
+      .map(entry => entry.item);
   }
 
   function handleHistory(data) {
     if (!data.history || !Array.isArray(data.history.prices)) return;
     if (data.echo_req?.ticks_history &&
         data.echo_req.ticks_history !== state.currentSymbol) return;
+    if (data.echo_req?.req_id != null && state.historyRequestId != null &&
+        Number(data.echo_req.req_id) !== state.historyRequestId) return;
+    state.historyRequestId = null;
 
     state.pipSize = precisionOf(data.pip_size ?? data.history.pip_size, state.pipSize);
     const historical = data.history.prices.map((price, index) =>
@@ -305,12 +308,8 @@ if (marketLabel) marketLabel.textContent = $("symbolSelect").selectedOptions[0]?
     state.pipSize = precisionOf(tick.pip_size, state.pipSize);
     const item = makeTick(tick.quote, tick.epoch, state.pipSize);
     if (!item) return;
-
-    if (item.epoch && state.lastTickEpoch && item.epoch === state.lastTickEpoch) {
-      const last = state.ticks[state.ticks.length - 1];
-      if (last && last.quote === item.quote) return;
-    }
-
+    // Deriv tick.id may identify the subscription stream rather than a unique
+    // observation. Never use it to discard subsequent legitimate tick updates.
     if (state.ticks.length >= 30) {
       const predicted = predictFromRecent(state.ticks);
       state.evalCount += 1;

@@ -1,0 +1,716 @@
+/* DigitScope Dataset Registry v1
+ * Metadata and compatibility controls only. Legacy outcomes are never rewritten.
+ * This module does not infer missing tick IDs or claim independent samples.
+ */
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === "object" && module.exports) module.exports = api;
+  if (root) root.DigitScopeDatasetRegistry = api;
+})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  "use strict";
+
+  const VERSION = "1.0.0";
+  const DEFINITIONS = Object.freeze({
+    "DS-01": { name: "Live market radar", kind: "raw_observations", unit: "tick", sampling: "live_stream", horizon: null, baseline: null, independent: false },
+    "DS-02": { name: "Signal Validation & Performance", kind: "forecast_outcomes", unit: "settled_forecast", sampling: "rolling_overlapping", horizon: 3, baseline: 0.10, independent: false },
+    "DS-03": { name: "Unified DIGIT Trade Scanner", kind: "contract_model_outcomes", unit: "model_contract_evaluation", sampling: "rolling_overlapping_multi_model", horizon: 3, baseline: "contract_specific", independent: false },
+    "DS-04": { name: "3-Tick MATCH / DIFFERS Analyzer", kind: "replay_outcomes", unit: "settled_forecast", sampling: "rolling_overlapping_replay", horizon: 3, baseline: "MATCH=0.10;DIFFERS=0.90", independent: false },
+    "DS-05": { name: "MATCH / DIFFERS Decision Engine", kind: "forecast_outcomes", unit: "settled_forecast", sampling: "every_third_tick", horizon: 3, baseline: "contract_specific", independent: false },
+    "DS-06": { name: "Rolling Performance Tracker", kind: "forecast_outcomes", unit: "settled_forecast", sampling: "rolling_overlapping", horizon: 3, baseline: 0.10, independent: false },
+    "DS-07": { name: "Statistical Reliability", kind: "forecast_outcomes", unit: "settled_forecast", sampling: "every_third_tick", horizon: 3, baseline: 0.10, independent: false },
+    "DS-08": { name: "Market Evidence & Holdout", kind: "evaluation_view", unit: "view_of_DS-06_outcomes", sampling: "chronological_split_of_DS-06", horizon: 3, baseline: 0.10, independent: false, derivedFrom: "DS-06" }
+  });
+
+  const runtimeRecords = [];
+  const REQUIRED = ["dataset_id", "methodology_version", "market", "contract", "model_id",
+    "forecast_origin_tick_id", "target_tick_id", "tick_identity_version", "training_window", "forecast_horizon",
+    "observed_digit", "hit", "scored_at_utc"];
+
+  function nonEmpty(value) { return value !== null && value !== undefined && String(value).trim() !== ""; }
+  function validDigit(value) { return Number.isInteger(value) && value >= 0 && value <= 9; }
+
+  function createProvenance(input) {
+    const source = input || {};
+    return {
+      dataset_id: source.dataset_id || "",
+      methodology_version: source.methodology_version || VERSION,
+      market: source.market || "",
+      contract: source.contract || "",
+      model_id: source.model_id || "",
+      selected_digit: source.selected_digit === undefined ? null : source.selected_digit,
+      forecast_origin_tick_id: source.forecast_origin_tick_id || null,
+      target_tick_id: source.target_tick_id || null,
+      tick_identity_version: source.tick_identity_version || "",
+      training_window: source.training_window || null,
+      forecast_horizon: source.forecast_horizon === undefined ? null : source.forecast_horizon,
+      observed_digit: source.observed_digit === undefined ? null : source.observed_digit,
+      hit: typeof source.hit === "boolean" ? source.hit : (source.hit === 0 || source.hit === 1 ? Boolean(source.hit) : null),
+      scored_at_utc: source.scored_at_utc || null
+    };
+  }
+
+  function validate(record) {
+    const r = createProvenance(record);
+    const missing = REQUIRED.filter(key => !nonEmpty(r[key]));
+    const errors = [];
+    if (!DEFINITIONS[r.dataset_id]) errors.push("unknown_dataset_id");
+    if (r.forecast_horizon !== null && (!Number.isInteger(r.forecast_horizon) || r.forecast_horizon < 1)) errors.push("invalid_forecast_horizon");
+    if (r.training_window !== null && (!Number.isInteger(r.training_window) || r.training_window < 1)) errors.push("invalid_training_window");
+    if (r.selected_digit !== null && !validDigit(r.selected_digit)) errors.push("invalid_selected_digit");
+    if (r.observed_digit !== null && !validDigit(r.observed_digit)) errors.push("invalid_observed_digit");
+    if (r.tick_identity_version && r.tick_identity_version !== "session-v1") errors.push("unsupported_tick_identity_version");
+    if (r.tick_identity_version === "session-v1" && nonEmpty(r.forecast_origin_tick_id) && nonEmpty(r.target_tick_id)) {
+      const parseTickId = value => {
+        const prefix = String(r.market) + ":";
+        if (!String(value).startsWith(prefix)) return null;
+        const parts = String(value).slice(prefix.length).split(":");
+        if (parts.length !== 2 || !parts[0] || !/^[0-9]+$/.test(parts[1])) return null;
+        const sequence = Number(parts[1]);
+        return Number.isSafeInteger(sequence) && sequence > 0 ? { session: parts[0], sequence } : null;
+      };
+      const origin = parseTickId(r.forecast_origin_tick_id), target = parseTickId(r.target_tick_id);
+      if (!origin || !target) errors.push("invalid_session_scoped_tick_id");
+      else {
+        if (origin.session !== target.session) errors.push("cross_session_forecast");
+        if (target.sequence <= origin.sequence) errors.push("target_not_after_origin");
+        if (Number.isInteger(r.forecast_horizon) && target.sequence - origin.sequence !== r.forecast_horizon)
+          errors.push("tick_sequence_horizon_mismatch");
+      }
+    }
+    if (r.forecast_origin_tick_id && r.target_tick_id && r.forecast_origin_tick_id === r.target_tick_id) errors.push("origin_equals_target");
+    if (r.scored_at_utc && Number.isNaN(Date.parse(r.scored_at_utc))) errors.push("invalid_scored_at_utc");
+    return { valid: missing.length === 0 && errors.length === 0, missing, errors, record: r,
+      status: missing.length || errors.length ? "LEGACY — PROVENANCE INCOMPLETE" : "PROVENANCE COMPLETE" };
+  }
+
+  function compatibility(a, b) {
+    const left = DEFINITIONS[a], right = DEFINITIONS[b];
+    if (!left || !right) return { compatible: false, status: "INVALID", reasons: ["unknown_dataset"] };
+    if (a === "DS-08" || b === "DS-08") return {
+      compatible: false, status: "VIEW — NOT AN INDEPENDENT DATASET",
+      reasons: ["DS-08 is a chronological evaluation view of DS-06, not a new outcome stream."]
+    };
+    if (a !== b) return { compatible: false, status: "NOT COMPARABLE BY DEFAULT",
+      reasons: ["Different dataset identities/methodologies; record-level compatibility must be established first."] };
+    return { compatible: true, status: "SAME DATASET DEFINITION",
+      reasons: ["Still verify market, contract, model, horizon, training window, and target-tick overlap."] };
+  }
+
+  function sampleProfile(records) {
+    const rows = Array.isArray(records) ? records : [];
+    const checked = rows.map(validate);
+    const invalidRecords = checked.filter(item => !item.valid).length;
+    const signatures = new Set(checked.map(item => {
+      const r = item.record;
+      return [r.dataset_id,r.methodology_version,r.market,r.contract,r.model_id,
+        r.training_window,r.forecast_horizon].join("|");
+    }));
+    const forecastKeys = new Set();
+    let duplicateForecastKeys = 0;
+    const targets = new Set();
+    const targetCounts = new Map();
+    rows.forEach(row => {
+      const r = createProvenance(row);
+      if (nonEmpty(r.forecast_origin_tick_id) && nonEmpty(r.target_tick_id)) {
+        const key = [r.dataset_id,r.market,r.contract,r.model_id,
+          r.forecast_origin_tick_id,r.target_tick_id].join("|");
+        if (forecastKeys.has(key)) duplicateForecastKeys++;
+        forecastKeys.add(key);
+      }
+      if (nonEmpty(r.market) && nonEmpty(r.target_tick_id)) {
+        const key = r.market + "|" + r.target_tick_id;
+        targets.add(key);
+        targetCounts.set(key,(targetCounts.get(key)||0)+1);
+      }
+    });
+    const repeatedTargets = [...targetCounts.values()].filter(count => count > 1).length;
+    const datasetIds = new Set(checked.map(item => item.record.dataset_id));
+    const datasetId = datasetIds.size === 1 ? [...datasetIds][0] : null;
+    const definition = datasetId ? DEFINITIONS[datasetId] : null;
+    const sessions = new Set();
+    const identityVersions = new Set();
+    rows.forEach(row => {
+      const r = createProvenance(row);
+      identityVersions.add(r.tick_identity_version || "");
+      const prefix = String(r.market || "") + ":";
+      [r.forecast_origin_tick_id, r.target_tick_id].forEach(id => {
+        if (nonEmpty(id) && String(id).startsWith(prefix)) {
+          const parts = String(id).slice(prefix.length).split(":");
+          if (parts.length === 2 && parts[0]) sessions.add(parts[0]);
+        }
+      });
+    });
+    return {
+      records: rows.length, invalidRecords, homogeneousDefinition: signatures.size === 1,
+      signatureCount: signatures.size, duplicateForecastKeys,
+      uniqueTargets: targets.size, repeatedTargetGroups: repeatedTargets,
+      datasetId, sampling: definition ? definition.sampling : null,
+      countUnit: definition ? definition.unit : null,
+      derivedFrom: definition ? definition.derivedFrom || null : null,
+      sessionCount: sessions.size, identityVersionCount: identityVersions.size
+    };
+  }
+
+  function compareSamples(leftRecords, rightRecords) {
+    const left = Array.isArray(leftRecords) ? leftRecords : [];
+    const right = Array.isArray(rightRecords) ? rightRecords : [];
+    const reasons = [];
+    if (!left.length || !right.length) return { compatible:false, status:"INVALID — EMPTY SAMPLE",
+      reasons:["Both samples must contain records."], leftProfile:sampleProfile(left), rightProfile:sampleProfile(right) };
+    const leftProfile = sampleProfile(left), rightProfile = sampleProfile(right);
+    const all = left.concat(right);
+    const checked = all.map(validate);
+    if (checked.some(x => !x.valid)) reasons.push("One or more records have incomplete or invalid provenance.");
+    if (!leftProfile.homogeneousDefinition || !rightProfile.homogeneousDefinition)
+      reasons.push("Each sample must contain one homogeneous dataset/methodology/market/contract/model/window/horizon definition.");
+    const ids = new Set(all.map(x => x.dataset_id));
+    if (ids.size !== 1) reasons.push("Dataset identities differ; cross-dataset comparison is disabled by default.");
+    if (ids.has("DS-08")) reasons.push("DS-08 is a derived chronological view of DS-06, not an independent dataset.");
+    if (leftProfile.duplicateForecastKeys || rightProfile.duplicateForecastKeys)
+      reasons.push("Duplicate forecast identity keys exist inside a sample; resolve record duplication before comparison.");
+    if (leftProfile.sessionCount !== 1 || rightProfile.sessionCount !== 1)
+      reasons.push("Each sample must be restricted to exactly one verified page session; mixed or unscoped tick sessions are not comparable.");
+    if (leftProfile.identityVersionCount !== 1 || rightProfile.identityVersionCount !== 1)
+      reasons.push("Each sample must use one consistent tick identity version.");
+    if (leftProfile.sampling !== rightProfile.sampling || leftProfile.countUnit !== rightProfile.countUnit)
+      reasons.push("Sampling design and count unit must match exactly.");
+    if (leftProfile.sampling && leftProfile.sampling.indexOf("rolling_overlapping") === 0)
+      reasons.push("Rolling-overlapping forecasts are dependent; independent-sample performance comparison is disabled pending dependence-aware analysis.");
+    if (leftProfile.sampling === "every_third_tick" &&
+        (leftProfile.repeatedTargetGroups || rightProfile.repeatedTargetGroups))
+      reasons.push("Every-third-tick samples must contain one forecast outcome per target tick; repeated targets block comparison.");
+    const signature = r => [r.dataset_id,r.methodology_version,r.market,r.contract,r.model_id,r.training_window,r.forecast_horizon].join("|");
+    const leftKeys = new Set(left.map(signature)), rightKeys = new Set(right.map(signature));
+    if (leftKeys.size !== 1 || rightKeys.size !== 1 || [...leftKeys][0] !== [...rightKeys][0])
+      reasons.push("Market, contract, model, methodology version, training window, and forecast horizon must match exactly.");
+    const targetSet = records => new Set(records.filter(r => nonEmpty(r.market) && nonEmpty(r.target_tick_id))
+      .map(r => r.market + "|" + r.target_tick_id));
+    const lt = targetSet(left), rt = targetSet(right);
+    let overlap = 0;
+    lt.forEach(key => { if (rt.has(key)) overlap++; });
+    if (overlap) reasons.push(overlap + " unique market/target ticks occur in both samples; samples are not independent.");
+    const compatible = reasons.length === 0;
+    return { compatible, status: compatible ? "COMPATIBLE NON-OVERLAPPING SAMPLE DEFINITIONS" :
+      "INVALID — PERFORMANCE COMPARISON DISABLED", reasons, leftRecords:left.length,
+      rightRecords:right.length, uniqueTargetOverlap:overlap, leftProfile, rightProfile };
+  }
+
+  let latestReplayAudit = null;
+
+  function runtimeSnapshot() {
+    const byDataset = {};
+    ["DS-02","DS-03"].forEach(datasetId => {
+      const rows = runtimeRecords.filter(row => row.dataset_id === datasetId);
+      const summary = audit(rows);
+      byDataset[datasetId] = {records:summary.records, incomplete:summary.incomplete,
+        duplicates:summary.duplicates, uniqueTargets:new Set(rows.filter(row=>nonEmpty(row.market)&&nonEmpty(row.target_tick_id))
+          .map(row=>row.market+"|"+row.target_tick_id)).size,
+        status:summary.incomplete || summary.duplicates ? "INVALID" : rows.length ? "METADATA PASS" : "WAITING"};
+    });
+    return {byDataset, replay:latestReplayAudit, totalRuntimeRecords:runtimeRecords.length};
+  }
+
+  function renderRuntimeStatus() {
+    if (typeof document === "undefined") return;
+    const node = document.getElementById("dspRegistryRuntime");
+    if (!node) return;
+    const snapshot = runtimeSnapshot();
+    const describe = (id, label) => {
+      const item = snapshot.byDataset[id];
+      return label + " " + item.records + " evaluations · " + item.incomplete +
+        " incomplete · " + item.duplicates + " duplicate keys · " + item.status;
+    };
+    const replay = snapshot.replay
+      ? "DS-04 latest replay " + snapshot.replay.records + " forecasts · " +
+        snapshot.replay.complete + " complete · " + snapshot.replay.incomplete +
+        " incomplete · " + snapshot.replay.duplicates + " duplicate keys · " + snapshot.replay.status +
+        " (selected market/contract/model/window snapshot; not a cumulative sample)"
+      : "DS-04 replay audit waiting for a live replay snapshot";
+    node.textContent = describe("DS-02","DS-02") + " | " + describe("DS-03","DS-03") +
+      " | " + replay + " | Runtime records retained in memory: " + snapshot.totalRuntimeRecords +
+      ". No outcomes are written by this audit.";
+  }
+
+  function ingest(record) {
+    const result = validate(record);
+    runtimeRecords.push(result.record);
+    if (runtimeRecords.length > 20000) runtimeRecords.shift();
+    renderRuntimeStatus();
+    return result;
+  }
+
+  // DS-04 is a derived replay, not a new persistent outcome stream. Replace the
+  // latest view on each render so repeated UI refreshes never inflate counts.
+  function reportReplay(records) {
+    const rows = Array.isArray(records) ? records : [];
+    const checked = rows.map(validate);
+    const seen = new Set();
+    let duplicates = 0;
+    checked.forEach(item => {
+      const r = item.record;
+      const key = [r.market,r.contract,r.model_id,r.forecast_origin_tick_id,r.target_tick_id].join("|");
+      if (nonEmpty(r.forecast_origin_tick_id) && nonEmpty(r.target_tick_id)) {
+        if (seen.has(key)) duplicates++;
+        seen.add(key);
+      }
+    });
+    const incomplete = checked.filter(item=>!item.valid).length;
+    latestReplayAudit = {records:rows.length,complete:rows.length-incomplete,incomplete,duplicates,
+      market:rows[0]?.market||null,contract:rows[0]?.contract||null,model_id:rows[0]?.model_id||null,
+      status:incomplete || duplicates ? "INVALID — REPLAY PROVENANCE CHECK FAILED" :
+        rows.length ? "PROVENANCE PASS" : "WAITING"};
+    renderRuntimeStatus();
+    return latestReplayAudit;
+  }
+
+  // Read-only audit of the three persistent validation streams. This function
+  // never writes to storage, migrates records, or invents missing identifiers.
+  const STORAGE_STREAMS = [
+    {dataset_id:"DS-05",key:"digitscopePro.matchDecision.v1",maxPerBucket:5000,
+      isLoaded:row=>Object.prototype.hasOwnProperty.call(row,"_auditRaw")?Boolean(row._auditRaw):Boolean(row),bucket:row=>row._auditBucket,
+      extract:data=>{
+        const out=[];Object.keys(data.markets||{}).forEach(symbol=>{
+          const market=data.markets[symbol]||{};
+          ["match","differs"].forEach(contract=>{
+            const rows=market[contract];
+            if(Array.isArray(rows))rows.forEach(row=>out.push(row&&typeof row==="object"?{...row,
+              dataset_id:row.dataset_id||"DS-05",market:row.market||symbol,
+              contract:row.contract||contract.toUpperCase(),_auditBucket:symbol+"|"+contract.toUpperCase()}:
+              {_auditRaw:row,_auditBucket:symbol+"|"+contract.toUpperCase()}));
+          });
+        });return out;
+      }},
+    {dataset_id:"DS-06",key:"digitscopePro.rollingValidation.v1",maxPerBucket:5000,
+      isLoaded:row=>Boolean(row&&typeof row.hit==="boolean"),bucket:row=>row._auditBucket,
+      extract:data=>{
+        const out=[];Object.keys(data.markets||{}).forEach(symbol=>{
+          const rows=data.markets[symbol]&&data.markets[symbol].outcomes;
+          if(Array.isArray(rows))rows.forEach(row=>out.push(row&&typeof row==="object"?{...row,
+            dataset_id:row.dataset_id||"DS-06",market:row.market||symbol,_auditBucket:symbol}:
+            {_auditRaw:row,_auditBucket:symbol}));
+        });return out;
+      }},
+    {dataset_id:"DS-07",key:"digitscopePro.statisticalReliability.v1",maxPerBucket:5000,
+      isLoaded:row=>Boolean(row&&typeof row.hit==="boolean"),bucket:row=>row._auditBucket,
+      extract:data=>{
+        const out=[];Object.keys(data.markets||{}).forEach(symbol=>{
+          const rows=data.markets[symbol]&&data.markets[symbol].outcomes;
+          if(Array.isArray(rows))rows.forEach(row=>out.push(row&&typeof row==="object"?{...row,
+            dataset_id:row.dataset_id||"DS-07",market:row.market||symbol,_auditBucket:symbol}:
+            {_auditRaw:row,_auditBucket:symbol}));
+        });return out;
+      }}
+  ];
+
+  // Build read-only, single-session, exact-cohort chronological partitions
+  // from saved DS-05/06/07 outcomes. These are structural diagnostics only.
+  function storedComparisonCohorts(storage) {
+    let source = storage || null;
+    if (!source) {
+      try { if (typeof localStorage !== "undefined") source = localStorage; }
+      catch (_) { return []; }
+    }
+    if (!source) return [];
+    const cohorts = [];
+    STORAGE_STREAMS.forEach(stream => {
+      let parsed;
+      try {
+        const raw = source.getItem(stream.key);
+        if (!raw) return;
+        parsed = JSON.parse(raw);
+        if (!parsed || parsed.version !== 1 || !parsed.markets) return;
+      } catch (_) { return; }
+      let rows;
+      try { rows = stream.extract(parsed); } catch (_) { return; }
+      const groups = new Map();
+      rows.forEach(row => {
+        if (!row || typeof row !== "object" || !validate(row).valid) return;
+        const r = createProvenance(row);
+        const prefix = String(r.market) + ":";
+        const target = String(r.target_tick_id || "");
+        if (!target.startsWith(prefix)) return;
+        const parts = target.slice(prefix.length).split(":");
+        if (parts.length !== 2 || !parts[0] || !/^\d+$/.test(parts[1])) return;
+        const session = parts[0], sequence = Number(parts[1]);
+        if (!Number.isSafeInteger(sequence)) return;
+        const key = [r.dataset_id,r.methodology_version,r.market,r.contract,r.model_id,
+          r.training_window,r.forecast_horizon,r.tick_identity_version,session].join("|");
+        if (!groups.has(key)) groups.set(key, { rows: [], session, sequenceKey:key,
+          dataset_id:r.dataset_id, market:r.market, contract:r.contract, model_id:r.model_id,
+          methodology_version:r.methodology_version, training_window:r.training_window,
+          forecast_horizon:r.forecast_horizon });
+        groups.get(key).rows.push({ row, sequence });
+      });
+      groups.forEach(group => {
+        group.rows.sort((a,b) => a.sequence-b.sequence);
+        const ordered = group.rows.map(item => item.row);
+        const split = Math.floor(ordered.length / 2);
+        if (split < 1 || ordered.length - split < 1) return;
+        const left = ordered.slice(0, split), right = ordered.slice(split);
+        const check = compareSamples(left, right);
+        cohorts.push({
+          id: group.sequenceKey,
+          label: stream.dataset_id + " · " + group.market + " · " + group.contract +
+            " · " + group.model_id + " · window " + group.training_window +
+            " · session " + group.session.slice(0,8) + "… · " + ordered.length + " outcomes",
+          dataset_id: stream.dataset_id, records: ordered.length, left, right, check
+        });
+      });
+    });
+    return cohorts.sort((a,b)=>a.label.localeCompare(b.label));
+  }
+
+  function auditPersistentStorage(storage) {
+    let source=storage || null;
+    if(!source) {
+      try { if(typeof localStorage!=="undefined") source=localStorage; }
+      catch (_) { return {available:false,status:"STORAGE ACCESS BLOCKED",streams:[],crossStreamTargetOverlap:0}; }
+    }
+    if(!source) return {available:false,status:"STORAGE UNAVAILABLE",streams:[],crossStreamTargetOverlap:0};
+    const streams=[], all=[];
+    for(const stream of STORAGE_STREAMS) {
+      let raw;
+      try { raw=source.getItem(stream.key); }
+      catch (_) { return {available:false,status:"STORAGE READ FAILED",streams:[],crossStreamTargetOverlap:0}; }
+      if(raw===null) {
+        streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"KEY ABSENT",storedRecords:0,
+          provenanceComplete:0,legacyIncomplete:0,malformed:0,uniqueTargets:0,duplicates:0});
+        continue;
+      }
+      let parsed;
+      try { parsed=JSON.parse(raw); }
+      catch (_) {
+        streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"MALFORMED JSON",storedRecords:0,
+          provenanceComplete:0,legacyIncomplete:0,malformed:1,uniqueTargets:0,duplicates:0});
+        continue;
+      }
+      if(!parsed || parsed.version!==1 || !parsed.markets || typeof parsed.markets!=="object") {
+        streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"UNRECOGNIZED SCHEMA",storedRecords:0,
+          provenanceComplete:0,legacyIncomplete:0,malformed:1,uniqueTargets:0,duplicates:0});
+        continue;
+      }
+      let rows;
+      try { rows=stream.extract(parsed); } catch (_) { rows=[]; }
+      let complete=0,incomplete=0,malformed=0,duplicates=0,loadedEligible=0,loadedRecords=0;
+      const targets=new Set(),targetForecastKeys=new Map(),bucketCounts=new Map(),bucketLoaded=new Map();
+      const conflictFields=["methodology_version","training_window","forecast_horizon","selected_digit","observed_digit","hit"];
+      const duplicateClasses={
+        complete:{seen:new Map(),groups:0,excess:0,sameResultExcess:0,conflictingResultExcess:0,examples:[]},
+        incomplete:{seen:new Map(),groups:0,excess:0,sameResultExcess:0,conflictingResultExcess:0,examples:[]}
+      };
+      const targetClasses={complete:new Set(),incomplete:new Set()};
+      rows.forEach(row=>{
+        const bucket=stream.bucket(row)||"unknown";
+        bucketCounts.set(bucket,(bucketCounts.get(bucket)||0)+1);
+        if(stream.isLoaded(row)){
+          loadedEligible++;
+          const used=bucketLoaded.get(bucket)||0;
+          if(used<stream.maxPerBucket){bucketLoaded.set(bucket,used+1);loadedRecords++;}
+        }
+        if(!row||typeof row!=="object"||Array.isArray(row)||Object.prototype.hasOwnProperty.call(row,"_auditRaw")){
+          malformed++;return;
+        }
+        const v=validate(row);
+        const classification=v.valid?"complete":"incomplete";
+        if(v.valid)complete++;else incomplete++;
+        const key=[row.market||"",row.contract||"",row.model_id||"",row.forecast_origin_tick_id||"",row.target_tick_id||""].join("|");
+        if(nonEmpty(row.forecast_origin_tick_id)&&nonEmpty(row.target_tick_id)){
+          const groupMap=duplicateClasses[classification].seen;
+          const prior=groupMap.get(key)||{count:0,fieldValues:Object.fromEntries(conflictFields.map(field=>[field,new Map()])),ids:[]};
+          conflictFields.forEach(field=>{
+            const value=JSON.stringify(row[field]??null);
+            prior.fieldValues[field].set(value,(prior.fieldValues[field].get(value)||0)+1);
+          });
+          prior.count++;
+          if(row.id!==undefined&&prior.ids.length<5)prior.ids.push(row.id);
+          groupMap.set(key,prior);
+          const targetKey=(row.market||"")+"|"+row.target_tick_id;
+          const forecasts=targetForecastKeys.get(targetKey)||new Set();
+          forecasts.add(key);targetForecastKeys.set(targetKey,forecasts);
+        }
+        if(nonEmpty(row.market)&&nonEmpty(row.target_tick_id)){
+          const target=row.market+"|"+row.target_tick_id;
+          targets.add(target);targetClasses[classification].add(target);
+        }
+        all.push({dataset_id:stream.dataset_id,market:row.market||"",target_tick_id:row.target_tick_id||null,
+          provenance_class:classification});
+      });
+      const duplicateExamples=[];
+      for(const classification of ["complete","incomplete"]){
+        const stats=duplicateClasses[classification];
+        const entries=[...stats.seen.entries()].filter(entry=>entry[1].count>1);
+        stats.groups=entries.length;
+        entries.forEach(([key,group])=>{
+          const excess=group.count-1;
+          stats.excess+=excess;
+          const differingFields=Object.keys(group.fieldValues).filter(field=>group.fieldValues[field].size>1);
+          if(differingFields.length)stats.conflictingResultExcess+=excess;
+          else stats.sameResultExcess+=excess;
+          if(stats.examples.length<5){
+            const parts=key.split("|");
+            const fieldDifferences=differingFields.map(field=>({field,values:[...group.fieldValues[field].entries()].map(([raw,count])=>{
+              let value;try{value=JSON.parse(raw);}catch(_){value=raw;}
+              return {value,occurrences:count};
+            })}));
+            const valueCount=field=>group.fieldValues[field].size;
+            stats.examples.push({market:parts[0],contract:parts[1],model_id:parts[2],
+              forecast_origin_tick_id:parts[3],target_tick_id:parts[4],occurrences:group.count,
+              classification:differingFields.length?"CONFLICTING_RESULT":"SAME_RESULT",
+              conflicting_fields:differingFields,field_differences:fieldDifferences,
+              observed_digit_agreement:valueCount("observed_digit")===1,
+              hit_consistency:valueCount("hit")===1,
+              record_ids:group.ids});
+          }
+        });
+        duplicateExamples.push(...stats.examples.map(example=>({...example,provenance_class:classification})));
+        duplicates+=stats.excess;
+      }
+      const duplicateGroups=duplicateClasses.complete.groups+duplicateClasses.incomplete.groups;
+      const identicalDuplicateExcessRecords=duplicateClasses.complete.sameResultExcess+duplicateClasses.incomplete.sameResultExcess;
+      const conflictingDuplicateExcessRecords=duplicateClasses.complete.conflictingResultExcess+duplicateClasses.incomplete.conflictingResultExcess;
+      const repeatedTargetGroups=[...targetForecastKeys.entries()].filter(entry=>entry[1].size>1);
+      const marketBreakdown=[...bucketCounts.entries()].map(entry=>({
+        bucket:entry[0],storedRecords:entry[1],loadedRecords:Math.min(entry[1],stream.maxPerBucket)
+      }));
+      streams.push({dataset_id:stream.dataset_id,key:stream.key,storage_status:"READ ONLY · PARSED",
+        storedRecords:rows.length,provenanceComplete:complete,legacyIncomplete:incomplete,
+        malformed,uniqueTargets:targets.size,duplicates,duplicateGroups,
+        identicalDuplicateExcessRecords,conflictingDuplicateExcessRecords,duplicateExamples,
+        provenanceSplit:{
+          complete:{records:complete,uniqueTargets:targetClasses.complete.size,
+            duplicateGroups:duplicateClasses.complete.groups,duplicateExcessRecords:duplicateClasses.complete.excess,
+            sameResultDuplicateExcessRecords:duplicateClasses.complete.sameResultExcess,
+            conflictingDuplicateExcessRecords:duplicateClasses.complete.conflictingResultExcess,
+            duplicateExamples:duplicateClasses.complete.examples},
+          incomplete:{records:incomplete,uniqueTargets:targetClasses.incomplete.size,
+            duplicateGroups:duplicateClasses.incomplete.groups,duplicateExcessRecords:duplicateClasses.incomplete.excess,
+            sameResultDuplicateExcessRecords:duplicateClasses.incomplete.sameResultExcess,
+            conflictingDuplicateExcessRecords:duplicateClasses.incomplete.conflictingResultExcess,
+            duplicateExamples:duplicateClasses.incomplete.examples}
+        },
+        repeatedTargetGroups:repeatedTargetGroups.length,
+        repeatedTargetExamples:repeatedTargetGroups.slice(0,5).map(entry=>({market_target:entry[0],distinctForecastKeys:entry[1].size})),
+        loadedEligibleRecords:loadedEligible,dashboardLoadedRecords:loadedRecords,
+        performanceEligibleRecords:complete,performanceExcludedRecords:rows.length-complete,
+        excludedFromDashboard:rows.length-loadedRecords,overCapRecords:loadedEligible-loadedRecords,marketBreakdown});
+
+    }
+    const targetSets=new Map();
+    all.forEach(row=>{
+      if(!row.target_tick_id)return;
+      const k=row.market+"|"+row.target_tick_id;
+      const s=targetSets.get(k)||new Set(); s.add(row.dataset_id); targetSets.set(k,s);
+    });
+    const crossStreamTargetOverlap=[...targetSets.values()].filter(s=>s.size>1).length;
+    const overlapByPair={"DS-05/DS-06":0,"DS-05/DS-07":0,"DS-06/DS-07":0};
+    targetSets.forEach(ids=>{
+      [["DS-05","DS-06"],["DS-05","DS-07"],["DS-06","DS-07"]].forEach(pair=>{
+        if(ids.has(pair[0])&&ids.has(pair[1]))overlapByPair[pair[0]+"/"+pair[1]]++;
+      });
+    });
+    return {available:true,status:"READ ONLY — NO DATA CHANGED",streams,crossStreamTargetOverlap,overlapByPair};
+  }
+
+  function audit(records) {
+    const list = Array.isArray(records) ? records : [];
+    const seen = new Set(), targets = new Map();
+    let duplicates = 0, targetReuse = 0, incomplete = 0;
+    const byDataset = {};
+    list.forEach(item => {
+      const result = validate(item);
+      const r = result.record;
+      byDataset[r.dataset_id] = (byDataset[r.dataset_id] || 0) + 1;
+      if (!result.valid) incomplete++;
+      const key = [r.dataset_id, r.market, r.contract, r.model_id, r.forecast_origin_tick_id, r.target_tick_id].join("|");
+      if (nonEmpty(r.forecast_origin_tick_id) && nonEmpty(r.target_tick_id)) {
+        if (seen.has(key)) duplicates++;
+        seen.add(key);
+      }
+      if (nonEmpty(r.target_tick_id)) {
+        const targetKey = r.market + "|" + r.target_tick_id;
+        const prior = targets.get(targetKey) || new Set();
+        if (prior.size && !prior.has(r.dataset_id + "|" + r.model_id)) targetReuse++;
+        prior.add(r.dataset_id + "|" + r.model_id);
+        targets.set(targetKey, prior);
+      }
+    });
+    return { records: list.length, incomplete, duplicates, targetReuse, byDataset,
+      status: incomplete || duplicates ? "INVALID — PERFORMANCE COMPARISON DISABLED" : "METADATA CHECKS PASSED — COMPATIBILITY STILL REQUIRED" };
+  }
+
+
+  if (typeof document !== "undefined") {
+    const installPanel = () => {
+      if (document.getElementById("dspDataIntegrity")) return;
+      const main = document.querySelector("main");
+      if (!main) return;
+      const panel = document.createElement("section");
+      panel.id = "dspDataIntegrity";
+      panel.style.cssText = "margin:14px 0;padding:18px;background:#101d2d;border:1px solid #76552b;border-radius:14px;color:#eaf2fb";
+      const rows = Object.entries(DEFINITIONS).map(([id, d]) =>
+        "<tr><td>"+id+"</td><td>"+d.name+"</td><td>"+d.unit+"</td><td>"+d.sampling+"</td><td>"+(d.derivedFrom || "—")+"</td><td>"+({ "DS-01":"RAW TICKS · separate unit", "DS-02":"DESCRIPTIVE · rolling overlap", "DS-03":"DESCRIPTIVE · rolling multi-model", "DS-04":"SNAPSHOT ONLY · rolling replay", "DS-05":"CONDITIONAL · disjoint targets + exact cohort", "DS-06":"DESCRIPTIVE · rolling overlap", "DS-07":"CONDITIONAL · disjoint targets + exact cohort", "DS-08":"DERIVED VIEW · never independent" }[id] || "REVIEW REQUIRED")+"</td></tr>"
+      ).join("");
+      panel.innerHTML = '<p style="font-size:10px;letter-spacing:2px;color:#52d6df;font-weight:800">DATA INTEGRITY · VALIDATION SEPARATION</p>' +
+        '<h2 style="font-size:19px;margin:4px 0 8px">Dataset Registry &amp; Provenance Control</h2>' +
+        '<p style="font-size:12px;color:#ffc477;margin:8px 0">INTEGRATION IN PROGRESS — PERFORMANCE COMPARISON DISABLED until each stream emits and reconciles complete provenance.</p>' +
+        '<p style="font-size:11px;color:#9db0c4;margin:8px 0">New tick IDs are page-session scoped to prevent counter reuse after reloads. Existing records are preserved; older counter-only IDs remain identity-incomplete because their original session cannot be recovered.</p>' +
+        '<div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse;font-size:11px"><thead><tr><th align="left">ID</th><th align="left">Dataset</th><th align="left">Count unit</th><th align="left">Sampling design</th><th align="left">Relationship</th><th align="left">Comparison policy</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+        '<button id="dspPersistentAuditBtn" type="button" style="margin-top:12px;padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run read-only saved-data audit</button><p id="dspPersistentAudit" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Saved browser records have not been inspected. This audit only reads existing storage.</p>' +
+        '<div style="margin-top:14px;padding:12px;background:#0a1725;border:1px solid #35506a;border-radius:10px"><strong style="font-size:13px">Live sample compatibility gate</strong><p style="font-size:11px;color:#9db0c4;margin:6px 0">Select a dataset first, then an individual market/contract/model/window/session cohort. Each cohort is tested separately; records are never combined across datasets or markets. Read-only; no records are changed.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><div id="dspCompatibilityDatasets" role="group" aria-label="Choose dataset" style="display:flex;gap:6px;flex-wrap:wrap;width:100%"><button type="button" data-dataset="" aria-pressed="true" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">All datasets</button><span style="font-size:11px;color:#9db0c4;align-self:center">Refresh cohorts to load DS-05, DS-06 and DS-07.</span></div><select id="dspCompatibilityCohort" aria-label="Individual market comparison cohort" style="flex:2;min-width:230px;padding:9px;background:#081522;color:#eaf2fb;border:1px solid #35506a;border-radius:8px"><option value="">Refresh cohorts first</option></select><button id="dspCompatibilityRefresh" type="button" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Refresh cohorts</button><button id="dspCompatibilityRun" type="button" style="padding:9px 12px;background:#18344a;border:1px solid #426078;border-radius:8px;color:#eaf2fb">Run compatibility gate</button></div><p id="dspCompatibilityCounts" style="font-size:11px;color:#9db0c4;margin:8px 0 0">Dataset and market cohort counts will appear after refresh.</p><p id="dspCompatibilityResult" role="status" aria-live="polite" style="font-size:11px;white-space:pre-line;color:#ffc477;margin:8px 0 0">NOT RUN — performance comparison remains disabled.</p></div><p id="dspRegistryRuntime" style="font-size:11px;color:#ffc477;margin:10px 0 0">Waiting for DS-02/DS-03 runtime evaluations and a DS-04 replay snapshot. These are session diagnostics, not saved-data counts.</p><p style="font-size:11px;color:#9db0c4;margin:10px 0 0">DS-08 is a chronological evaluation view of DS-06, not an independent sample. Counts from model evaluations, forecasts, settled outcomes, raw ticks and unique target ticks must never be added or compared as if they were the same unit.</p>';
+      const datasetButtons=panel.querySelector("#dspCompatibilityDatasets");
+      const cohortSelect=panel.querySelector("#dspCompatibilityCohort");
+      const cohortRefresh=panel.querySelector("#dspCompatibilityRefresh");
+      const cohortRun=panel.querySelector("#dspCompatibilityRun");
+      const cohortResult=panel.querySelector("#dspCompatibilityResult");
+      const cohortCounts=panel.querySelector("#dspCompatibilityCounts");
+      let availableCohorts=[];
+      let visibleCohorts=[];
+      let activeDatasetId="";
+      const renderCohortOptions=()=>{
+        visibleCohorts=availableCohorts.filter(cohort=>!activeDatasetId||cohort.dataset_id===activeDatasetId);
+        cohortSelect.replaceChildren();
+        const grouped=new Map();
+        visibleCohorts.forEach((cohort,index)=>{
+          if(!grouped.has(cohort.dataset_id)) grouped.set(cohort.dataset_id,[]);
+          grouped.get(cohort.dataset_id).push({cohort,index});
+        });
+        grouped.forEach((items,id)=>{
+          const optgroup=document.createElement("optgroup");
+          optgroup.label=id+" · "+items.length+" market cohorts";
+          items.forEach(({cohort,index})=>{
+            const option=document.createElement("option");
+            option.value=String(index);
+            option.textContent=cohort.label.replace(id+" · ","");
+            optgroup.appendChild(option);
+          });
+          cohortSelect.appendChild(optgroup);
+        });
+        if(!visibleCohorts.length){
+          const option=document.createElement("option");
+          option.value=""; option.textContent="No eligible cohorts for this dataset";
+          cohortSelect.appendChild(option);
+        }
+        if(datasetButtons){
+          datasetButtons.querySelectorAll("button[data-dataset]").forEach(button=>{
+            const selected=button.dataset.dataset===activeDatasetId;
+            button.setAttribute("aria-pressed",selected?"true":"false");
+            button.style.background=selected?"#17616a":"#18344a";
+            button.style.borderColor=selected?"#52d6df":"#426078";
+          });
+        }
+      };
+      if(datasetButtons) datasetButtons.addEventListener("click",event=>{
+        const button=event.target.closest("button[data-dataset]");
+        if(!button||!datasetButtons.contains(button))return;
+        activeDatasetId=button.dataset.dataset||"";
+        renderCohortOptions();
+        cohortResult.textContent=activeDatasetId
+          ? "Selected "+activeDatasetId+". Now choose one market/contract/model/window/session cohort."
+          : "Showing all datasets. Choose a dataset button, then one individual market cohort.";
+      });
+      if(cohortRefresh) cohortRefresh.addEventListener("click",()=>{
+        availableCohorts=storedComparisonCohorts();
+        activeDatasetId="";
+        datasetButtons.replaceChildren();
+        const countsById={};
+        ["DS-05","DS-06","DS-07"].forEach(id=>{
+          countsById[id]=availableCohorts.filter(cohort=>cohort.dataset_id===id).length;
+        });
+        const addDatasetButton=(id,label,count)=>{
+          const button=document.createElement("button");
+          button.type="button";button.dataset.dataset=id;button.setAttribute("aria-pressed",id===""?"true":"false");
+          button.textContent=label+" ("+count+" cohorts)";
+          button.style.cssText="padding:9px 12px;background:"+(id===""?"#17616a":"#18344a")+";border:1px solid "+(id===""?"#52d6df":"#426078")+";border-radius:8px;color:#eaf2fb";
+          datasetButtons.appendChild(button);
+        };
+        addDatasetButton("","All datasets",availableCohorts.length);
+        ["DS-05","DS-06","DS-07"].forEach(id=>addDatasetButton(id,id,countsById[id]));
+        renderCohortOptions();
+        const summaries=["DS-05","DS-06","DS-07"].map(id=>{
+          const rows=availableCohorts.filter(cohort=>cohort.dataset_id===id);
+          const markets=[...new Set(rows.map(cohort=>cohort.market))].sort();
+          return id+": "+rows.length+" cohorts across "+markets.length+" markets"+(markets.length?" ["+markets.join(", ")+"]":"");
+        });
+        cohortCounts.textContent=summaries.join(" · ");
+        cohortResult.textContent=availableCohorts.length
+          ? "Loaded "+availableCohorts.length+" exact, complete-provenance cohorts. Tap a dataset button above, then choose one market cohort."
+          : "NO ELIGIBLE COHORTS — no complete, session-scoped saved cohort has at least two outcomes. Audit counts do not guarantee two records in the same exact session/model/window cohort.";
+      });
+      if(cohortRun) cohortRun.addEventListener("click",()=>{
+        const selectedIndex=cohortSelect.value;
+        const cohort=selectedIndex===""?null:visibleCohorts[Number(selectedIndex)];
+        if(!cohort){cohortResult.textContent="NOT RUN — refresh cohorts, choose a dataset, and select an individual market cohort.";return;}
+        const result=compareSamples(cohort.left,cohort.right);
+        cohortResult.textContent=(result.compatible
+          ? "STRUCTURAL COMPATIBILITY PASS — NOT PERFORMANCE AUTHORIZATION"
+          : "BLOCKED — PERFORMANCE COMPARISON DISABLED")+
+          "\n"+cohort.label+
+          "\nChronological partition: "+result.leftRecords+" discovery / "+result.rightRecords+" later outcomes"+
+          "\nTarget overlap: "+result.uniqueTargetOverlap+
+          "\nSampling: "+cohort.check.leftProfile.sampling+" · count unit: "+cohort.check.leftProfile.countUnit+
+          (result.reasons.length?"\nReasons: "+result.reasons.join(" "):
+            "\nStructural checks passed. This does not establish statistical independence, predictive skill, or a trading edge.");
+      });
+      const auditButton=panel.querySelector("#dspPersistentAuditBtn");
+      if(auditButton) auditButton.addEventListener("click",()=>{
+        const result=auditPersistentStorage();
+        const output=panel.querySelector("#dspPersistentAudit");
+        if(!result.available){output.textContent=result.status;return;}
+        output.style.whiteSpace="pre-line";
+        output.textContent=result.streams.map(s=>{
+          const buckets=(s.marketBreakdown||[]).map(x=>x.bucket+" stored="+x.storedRecords+" loaded="+x.loadedRecords).join("; ");
+          return s.dataset_id+" · "+s.storage_status+" · stored="+s.storedRecords+
+            " · complete="+s.provenanceComplete+" · legacy/incomplete="+s.legacyIncomplete+" · malformed="+s.malformed+
+            " · dashboard-loaded="+s.dashboardLoadedRecords+" · performance-eligible="+(s.performanceEligibleRecords||0)+
+            " · performance-excluded="+(s.performanceExcludedRecords||0)+" · excluded="+s.excludedFromDashboard+
+            " · over-cap="+s.overCapRecords+" · unique targets="+s.uniqueTargets+" · duplicate excess rows="+s.duplicates+
+            " · duplicate groups="+(s.duplicateGroups||0)+" · same-result repeats="+(s.identicalDuplicateExcessRecords||0)+
+            " · conflicting-result repeats="+(s.conflictingDuplicateExcessRecords||0)+
+            " · targets with multiple forecast keys="+(s.repeatedTargetGroups||0)+
+            ((s.duplicateExamples||[]).length?"\n  Duplicate examples: "+s.duplicateExamples.map(x=>
+              x.market+"|"+x.contract+"|"+x.model_id+" origin="+x.forecast_origin_tick_id+" target="+x.target_tick_id+
+              " occurrences="+x.occurrences+" "+x.classification+
+              (x.conflicting_fields&&x.conflicting_fields.length?" fields="+x.conflicting_fields.join(","):"")+
+              (x.field_differences&&x.field_differences.length?" values="+x.field_differences.map(d=>d.field+"=["+d.values.map(v=>JSON.stringify(v.value)+" × "+v.occurrences).join(", ")+"]").join("; "):"")+
+              " observed-digit-agreement="+(x.observed_digit_agreement===undefined?"n/a":x.observed_digit_agreement)+
+              " hit-consistency="+(x.hit_consistency===undefined?"n/a":x.hit_consistency)).join("; "):"")+
+            ((s.provenanceSplit)? "\n  COMPLETE provenance: records="+s.provenanceSplit.complete.records+
+              " unique-targets="+s.provenanceSplit.complete.uniqueTargets+
+              " duplicate-groups="+s.provenanceSplit.complete.duplicateGroups+
+              " duplicate-excess="+s.provenanceSplit.complete.duplicateExcessRecords+
+              " same-result-excess="+s.provenanceSplit.complete.sameResultDuplicateExcessRecords+
+              " conflicting-excess="+s.provenanceSplit.complete.conflictingDuplicateExcessRecords+
+              "\n  INCOMPLETE/LEGACY: records="+s.provenanceSplit.incomplete.records+
+              " unique-targets="+s.provenanceSplit.incomplete.uniqueTargets+
+              " duplicate-groups="+s.provenanceSplit.incomplete.duplicateGroups+
+              " duplicate-excess="+s.provenanceSplit.incomplete.duplicateExcessRecords+
+              " same-result-excess="+s.provenanceSplit.incomplete.sameResultDuplicateExcessRecords+
+              " conflicting-excess="+s.provenanceSplit.incomplete.conflictingDuplicateExcessRecords:"")+
+            ((s.repeatedTargetExamples||[]).length?"\n  Reused-target examples: "+s.repeatedTargetExamples.map(x=>
+              x.market_target+" ("+x.distinctForecastKeys+" forecast keys)").join("; "):"")+
+            (buckets?"\n  By market/contract: "+buckets:"");
+        }).join("\n")+
+          "\nCross-stream shared market/target ticks: "+result.crossStreamTargetOverlap+
+          " · "+Object.entries(result.overlapByPair||{}).map(x=>x[0]+": "+x[1]).join(" · ")+
+          "\n"+result.status;
+      });
+      const hero = main.querySelector(".hero");
+      if (hero) hero.insertAdjacentElement("afterend", panel);
+      else main.prepend(panel);
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", installPanel, { once: true });
+    else installPanel();
+    if (typeof MutationObserver !== "undefined" && document.body) {
+      const observer = new MutationObserver(() => {
+        if (document.querySelector("main") && !document.getElementById("dspDataIntegrity")) {
+          installPanel();
+          if (document.getElementById("dspDataIntegrity")) observer.disconnect();
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      setTimeout(() => observer.disconnect(), 15000);
+    }
+  }
+
+  return Object.freeze({ VERSION, DEFINITIONS, REQUIRED, createProvenance, validate, compatibility, sampleProfile, compareSamples, storedComparisonCohorts, audit, auditPersistentStorage, ingest, reportReplay, runtimeSnapshot, runtimeRecords });
+});
