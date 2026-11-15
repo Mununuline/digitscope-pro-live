@@ -14,6 +14,7 @@ const COOKIE_NAME = "dsp_oauth_session";
 const sessions = new Map();
 
 app.disable("x-powered-by");
+app.use(express.json({ limit: "24kb" }));
 app.use(express.static(publicDirectory, {
   etag: true,
   maxAge: process.env.NODE_ENV === "production" ? "5m" : 0
@@ -83,6 +84,93 @@ async function fetchDemoAccounts(accessToken) {
   const accounts = Array.isArray(root) ? root : (root.accounts || root.items || []);
   return accounts.map(safeAccount).filter(account => account && account.account_id);
 }
+
+
+// AI Market Assistant: deterministic eligibility gates always own the decision.
+// An optional language model may explain the supplied evidence, but cannot
+// upgrade WAIT/NO TRADE or place orders.
+const assistantRequests = new Map();
+const ALLOWED_MARKETS = new Set(["R_10","R_25","R_50","R_75","R_100","1HZ10V","1HZ25V","1HZ50V","1HZ75V","1HZ100V"]);
+
+function wilsonLowerBound(wins, trials, z = 1.96) {
+  if (!trials) return 0;
+  const p = wins / trials, z2 = z * z;
+  return (p + z2 / (2 * trials) - z * Math.sqrt((p * (1 - p) + z2 / (4 * trials)) / trials)) / (1 + z2 / trials);
+}
+
+function evaluateAssistant(input) {
+  const market = String(input.market || "");
+  const contract = String(input.contract || "");
+  const tickCount = Number(input.tickCount);
+  const latencyMs = input.latencyMs === null ? null : Number(input.latencyMs);
+  const validationTrials = Number(input.validationTrials);
+  const validationWins = Number(input.validationWins);
+  const payout = Number(input.totalPayout);
+  const estimatedChance = Number(input.estimatedChance);
+  const reasons = [];
+  if (!ALLOWED_MARKETS.has(market)) reasons.push("Unknown or unsupported market.");
+  if (!["MATCHES","DIFFERS"].includes(contract)) reasons.push("No valid contract candidate.");
+  if (!Number.isInteger(tickCount) || tickCount < 500) reasons.push("At least 500 live ticks are required.");
+  if (input.signalQualified !== true) reasons.push("The statistical signal gate is not qualified.");
+  if (latencyMs !== null && (!Number.isFinite(latencyMs) || latencyMs > 250)) reasons.push("Feed latency is too high or unavailable.");
+  if (!Number.isInteger(validationTrials) || validationTrials < 100) reasons.push("At least 100 independent, contract-matched out-of-sample trials are required.");
+  if (!Number.isInteger(validationWins) || validationWins < 0 || validationWins > validationTrials) reasons.push("Validation outcome counts are invalid.");
+  if (!Number.isFinite(payout) || payout <= 1) reasons.push("A current Deriv total-payout quote is required.");
+  if (!Number.isFinite(estimatedChance) || estimatedChance <= 0 || estimatedChance >= 1) reasons.push("A valid estimated event probability is required.");
+  const lowerBound = Number.isInteger(validationTrials) && validationTrials > 0 &&
+    Number.isInteger(validationWins) && validationWins >= 0 && validationWins <= validationTrials
+      ? wilsonLowerBound(validationWins, validationTrials) : 0;
+  const breakEven = Number.isFinite(payout) && payout > 1 ? 1 / payout : null;
+  if (breakEven !== null && lowerBound <= breakEven) reasons.push("The 95% Wilson lower bound does not exceed the quoted break-even probability.");
+  if (Number.isFinite(estimatedChance) && breakEven !== null && estimatedChance <= breakEven) reasons.push("The estimated probability does not exceed the quoted break-even probability.");
+  const decision = reasons.length ? (tickCount < 500 || validationTrials < 100 || !Number.isFinite(payout) || payout <= 1 ? "WAIT" : "NO TRADE") : "TRADE";
+  return {
+    decision, market, contract, tickCount: Number.isFinite(tickCount) ? tickCount : 0,
+    validationTrials: Number.isFinite(validationTrials) ? validationTrials : 0,
+    validationWinRate: validationTrials > 0 && validationWins >= 0 && validationWins <= validationTrials ? validationWins / validationTrials : null,
+    validationLowerBound: lowerBound, breakEvenProbability: breakEven, reasons,
+    execution: "DISABLED — decision support only; no order was placed."
+  };
+}
+
+app.post("/api/assistant/analyze", async (req, res) => {
+  noStore(res);
+  const session = getSession(req, res, true);
+  const now = Date.now();
+  const last = assistantRequests.get(session);
+  if (last && now - last < 2500) return res.status(429).json({ error: "Please wait before requesting another analysis." });
+  assistantRequests.set(session, now);
+  const result = evaluateAssistant(req.body || {});
+  let commentary = "Rule-based analysis is active. " + (result.reasons.length ? result.reasons.join(" ") : "All evidence gates passed.");
+  let aiMode = "RULES_ONLY";
+  if (process.env.AI_GATEWAY_API_KEY && process.env.AI_GATEWAY_MODEL) {
+    try {
+      const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + process.env.AI_GATEWAY_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: process.env.AI_GATEWAY_MODEL,
+          temperature: 0.1,
+          max_tokens: 180,
+          messages: [
+            { role: "system", content: "You are DigitScope's market-analysis explainer. Explain only the supplied verified metrics in plain concise language. Never invent evidence, probabilities, market loopholes, or forecasts. The deterministic decision is authoritative: do not change it, upgrade it, or recommend overriding it. State clearly that synthetic-index outcomes may be unpredictable." },
+            { role: "user", content: JSON.stringify({ ...result, authoritativeDecision: result.decision }) }
+          ]
+        }),
+        signal: AbortSignal.timeout(8000)
+      });
+      const body = await response.json().catch(() => ({}));
+      const text = body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;
+      if (response.ok && typeof text === "string" && text.trim()) {
+        commentary = text.trim().slice(0, 1200);
+        aiMode = "AI_GATEWAY";
+      }
+    } catch (_) {
+      // Keep the deterministic result and fallback commentary on model failures.
+    }
+  }
+  res.json({ ...result, commentary, aiMode, analyzedAt: new Date().toISOString() });
+});
 
 app.get("/health", (_req, res) => {
   res.status(200).json({
