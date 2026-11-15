@@ -670,7 +670,10 @@
             ((s.duplicateExamples||[]).length?"\n  Duplicate examples: "+s.duplicateExamples.map(x=>
               x.market+"|"+x.contract+"|"+x.model_id+" origin="+x.forecast_origin_tick_id+" target="+x.target_tick_id+
               " occurrences="+x.occurrences+" "+x.classification+
-              (x.conflicting_fields&&x.conflicting_fields.length?" fields="+x.conflicting_fields.join(","):"")).join("; "):"")+
+              (x.conflicting_fields&&x.conflicting_fields.length?" fields="+x.conflicting_fields.join(","):"")+
+              (x.field_differences&&x.field_differences.length?" values="+x.field_differences.map(d=>d.field+"=["+d.values.map(v=>JSON.stringify(v.value)+" × "+v.occurrences).join(", ")+"]").join("; "):"")+
+              " observed-digit-agreement="+(x.observed_digit_agreement===undefined?"n/a":x.observed_digit_agreement)+
+              " hit-consistency="+(x.hit_consistency===undefined?"n/a":x.hit_consistency)).join("; "):"")+
             ((s.provenanceSplit)? "\n  COMPLETE provenance: records="+s.provenanceSplit.complete.records+
               " unique-targets="+s.provenanceSplit.complete.uniqueTargets+
               " duplicate-groups="+s.provenanceSplit.complete.duplicateGroups+
