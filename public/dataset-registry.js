@@ -416,8 +416,11 @@
         const key=[row.market||"",row.contract||"",row.model_id||"",row.forecast_origin_tick_id||"",row.target_tick_id||""].join("|");
         if(nonEmpty(row.forecast_origin_tick_id)&&nonEmpty(row.target_tick_id)){
           const groupMap=duplicateClasses[classification].seen;
-          const prior=groupMap.get(key)||{count:0,fieldValues:Object.fromEntries(conflictFields.map(field=>[field,new Set()])),ids:[]};
-          conflictFields.forEach(field=>prior.fieldValues[field].add(JSON.stringify(row[field]??null)));
+          const prior=groupMap.get(key)||{count:0,fieldValues:Object.fromEntries(conflictFields.map(field=>[field,new Map()])),ids:[]};
+          conflictFields.forEach(field=>{
+            const value=JSON.stringify(row[field]??null);
+            prior.fieldValues[field].set(value,(prior.fieldValues[field].get(value)||0)+1);
+          });
           prior.count++;
           if(row.id!==undefined&&prior.ids.length<5)prior.ids.push(row.id);
           groupMap.set(key,prior);
@@ -445,10 +448,18 @@
           else stats.sameResultExcess+=excess;
           if(stats.examples.length<5){
             const parts=key.split("|");
+            const fieldDifferences=differingFields.map(field=>({field,values:[...group.fieldValues[field].entries()].map(([raw,count])=>{
+              let value;try{value=JSON.parse(raw);}catch(_){value=raw;}
+              return {value,occurrences:count};
+            })}));
+            const valueCount=field=>group.fieldValues[field].size;
             stats.examples.push({market:parts[0],contract:parts[1],model_id:parts[2],
               forecast_origin_tick_id:parts[3],target_tick_id:parts[4],occurrences:group.count,
               classification:differingFields.length?"CONFLICTING_RESULT":"SAME_RESULT",
-              conflicting_fields:differingFields,record_ids:group.ids});
+              conflicting_fields:differingFields,field_differences:fieldDifferences,
+              observed_digit_agreement:valueCount("observed_digit")===1,
+              hit_consistency:valueCount("hit")===1,
+              record_ids:group.ids});
           }
         });
         duplicateExamples.push(...stats.examples.map(example=>({...example,provenance_class:classification})));
