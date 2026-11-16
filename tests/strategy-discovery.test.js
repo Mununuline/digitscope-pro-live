@@ -1,34 +1,10 @@
 "use strict";
-
-const test = require("node:test");
-const assert = require("node:assert/strict");
-const { discoverStrategies } = require("../strategy-discovery");
-
-test("waits for sufficient sequential market history", () => {
-  const result = discoverStrategies({ market: "R_75", digits: Array(100).fill(3) });
-  assert.equal(result.status, "WAIT");
-  assert.equal(result.candidates.length, 0);
-});
-
-test("generates versioned candidate strategies without granting trade eligibility", () => {
-  const digits = Array.from({ length: 600 }, (_, i) => (i * 7 + Math.floor(i / 11)) % 10);
-  const result = discoverStrategies({ market: "R_75", digits });
-  assert.equal(result.status, "RESEARCH_ONLY");
-  assert.equal(result.candidates.length, 7);
-  assert.equal(result.tradeEligible, false);
-  assert.equal(result.decision, "WAIT");
-  assert.ok(result.candidates.every(x => x.id && x.trials > 0 && x.status === "EXPLORATORY_CANDIDATE"));
-  assert.match(result.execution, /DISABLED/);
-});
-
-test("rejects unsupported markets and invalid digits", () => {
-  assert.throws(() => discoverStrategies({ market: "UNKNOWN", digits: Array(400).fill(1) }), /Unsupported market/);
-  assert.throws(() => discoverStrategies({ market: "R_50", digits: [...Array(300).fill(1), 10] }), /valid last digits/);
-});
-
-test("walk-forward candidate results never claim certainty", () => {
-  const result = discoverStrategies({ market: "R_10", digits: Array(500).fill(4) });
-  assert.equal(result.tradeEligible, false);
-  assert.equal(result.decision, "WAIT");
-  assert.ok(result.candidates.every(x => x.hitRate <= 1 && x.wilsonLowerBound <= x.hitRate));
-});
+const test=require("node:test");
+const assert=require("node:assert/strict");
+const {discoverStrategies,wilsonLowerBound,regimeSnapshot}=require("../strategy-discovery");
+test("waits for sufficient sequential market history",()=>{const r=discoverStrategies({market:"R_75",digits:Array(100).fill(3)});assert.equal(r.status,"WAIT");assert.equal(r.candidates.length,0);assert.equal(r.tradeEligible,false)});
+test("returns current candidate digit and keeps it research-only",()=>{const digits=Array.from({length:600},(_,i)=>(i*7+Math.floor(i/11))%10);const r=discoverStrategies({market:"R_75",digits});assert.equal(r.status,"RESEARCH_ONLY");assert.equal(r.candidates.length,7);assert.ok(Number.isInteger(r.forecast.targetDigit));assert.equal(r.forecast.contract,"MATCHES");assert.equal(r.tradeEligible,false);assert.equal(r.decision,"WAIT");assert.ok(r.candidates.every(x=>x.id&&x.trials>0&&x.status==="EXPLORATORY_CANDIDATE"));assert.ok(r.regime.digitCounts.reduce((a,b)=>a+b,0)===600)});
+test("rejects unsupported markets, malformed digits and non-arrays",()=>{assert.throws(()=>discoverStrategies({market:"UNKNOWN",digits:Array(400).fill(1)}),/Unsupported market/);assert.throws(()=>discoverStrategies({market:"R_50",digits:[...Array(300).fill(1),10]}),/valid last digits/);assert.throws(()=>discoverStrategies({market:"R_50",digits:"123"}),/valid last digits/)});
+test("walk-forward forecasts do not inspect the next unseen tick",()=>{const prefix=Array.from({length:500},(_,i)=>i%10);const a=discoverStrategies({market:"R_10",digits:prefix});const b=discoverStrategies({market:"R_10",digits:[...prefix,9]});assert.equal(a.forecast.targetDigit,b.candidates.find(x=>x.id===a.forecast.strategyId)?.targetDigit);assert.equal(a.tradeEligible,false)});
+test("Wilson lower bound is bounded and below observed rate",()=>{const lo=wilsonLowerBound(60,100);assert.ok(lo>0&&lo<0.6);assert.equal(wilsonLowerBound(0,0),0)});
+test("regime snapshot counts only supplied market digits",()=>{const r=regimeSnapshot([1,1,2,2]);assert.equal(r.digitCounts[1],2);assert.equal(r.digitCounts[2],2);assert.equal(r.lastDigit,2)});
