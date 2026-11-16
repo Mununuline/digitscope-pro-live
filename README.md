@@ -82,3 +82,14 @@ After deployment, test:
 - `public/index.html` - dashboard structure
 - `public/styles.css` - responsive styling
 - `public/app.js` - Deriv WebSocket, tick processing and statistics
+
+
+## AI Strategy Discovery Engine (integrated roadmap)
+
+DigitScope Pro is being extended beyond fixed-pattern analysis into an AI-assisted **strategy discovery, testing, competition, and improvement engine**. The intended workflow is still simple: select a Volatility market, tap **SCAN**, and receive a target last digit (0–9), contract, entry/expiry tick, and a TRADE / WAIT / NO TRADE decision with evidence.
+
+The engine will observe prevailing market regimes; manufacture versioned, reproducible strategy hypotheses; evaluate them chronologically on unseen outcomes; compare them against baselines and current payout break-even; and promote only robust, contract-matched candidates. AI can propose new strategies and parameter variants, but the deterministic assistant remains the final decision gate and cannot be overridden by an LLM.
+
+The strategy lifecycle, Quick Scan result contract, implementation sequence, and required tests are specified in [docs/AI-STRATEGY-DISCOVERY.md](docs/AI-STRATEGY-DISCOVERY.md).
+
+**Important:** This is an integrated architecture and implementation roadmap, not a claim that autonomous strategy generation or contract-specific validation is already live. Preserve DS-01–DS-08 and their provenance constraints; do not use unresolved registry data for performance comparisons. Order execution remains disabled.
