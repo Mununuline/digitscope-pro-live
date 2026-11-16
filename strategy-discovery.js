@@ -7,19 +7,20 @@ function countsOf(digits) {
   for (const digit of digits) counts[digit]++;
   return counts;
 }
-function chooseHot(digits) { const c=countsOf(digits); return c.indexOf(Math.max(...c)); }
-function chooseCold(digits) { const c=countsOf(digits); return c.indexOf(Math.min(...c)); }
+function uniqueExtremeIndex(values,extreme){const target=extreme==="max"?Math.max(...values):Math.min(...values);const matches=[];values.forEach((v,i)=>{if(v===target)matches.push(i)});return matches.length===1?matches[0]:null;}
+function chooseHot(digits) { return uniqueExtremeIndex(countsOf(digits),"max"); }
+function chooseCold(digits) { return uniqueExtremeIndex(countsOf(digits),"min"); }
 function chooseTransition(digits) {
   const matrix=Array.from({length:10},()=>Array(10).fill(0));
   for(let i=0;i<digits.length-1;i++) matrix[digits[i]][digits[i+1]]++;
   const row=matrix[digits[digits.length-1]];
   if(row.reduce((a,b)=>a+b,0)<5) return null;
-  return row.indexOf(Math.max(...row));
+  return uniqueExtremeIndex(row,"max");
 }
 function chooseRepeat(digits) { return digits.length>=2?digits[digits.length-1]:null; }
 function chooseAlternate(digits) {
   if(digits.length<3) return null;
-  return digits[digits.length-1]===digits[digits.length-2]?null:digits[digits.length-1];
+  return digits[digits.length-1]===digits[digits.length-2]?null:digits[digits.length-2];
 }
 const STRATEGIES=[
  {id:"rolling-hot-100-v1",label:"Rolling hot digit · 100",window:100,pick:chooseHot},
