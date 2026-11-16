@@ -90,6 +90,6 @@ DigitScope Pro is being extended beyond fixed-pattern analysis into an AI-assist
 
 The engine will observe prevailing market regimes; manufacture versioned, reproducible strategy hypotheses; evaluate them chronologically on unseen outcomes; compare them against baselines and current payout break-even; and promote only robust, contract-matched candidates. AI can propose new strategies and parameter variants, but the deterministic assistant remains the final decision gate and cannot be overridden by an LLM.
 
-The strategy lifecycle, Quick Scan result contract, implementation sequence, and required tests are specified in [docs/AI-STRATEGY-DISCOVERY.md](docs/AI-STRATEGY-DISCOVERY.md).
+The strategy lifecycle, Quick Scan result contract, implementation sequence, and required tests are specified in [docs/AI-STRATEGY-DISCOVERY.md](docs/AI-STRATEGY-DISCOVERY.md). An initial exploratory candidate generator is now available at `POST /api/strategy/discover`; it tests seven versioned hypotheses with chronological one-step replay. It is research-only and always returns `WAIT` / `tradeEligible: false` until independent future shadow validation and the full promotion controls are implemented.
 
 **Important:** This is an integrated architecture and implementation roadmap, not a claim that autonomous strategy generation or contract-specific validation is already live. Preserve DS-01–DS-08 and their provenance constraints; do not use unresolved registry data for performance comparisons. Order execution remains disabled.
