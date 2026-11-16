@@ -26,8 +26,11 @@ async function discoverActiveMarket(){
   setDiscoveryResult({...result,scannedAt:new Date().toISOString()});
   if(Number.isInteger(result.forecast?.targetDigit)&&result.forecast?.strategyId&&current.length){
    const originEpoch=current[current.length-1].epoch;
-   const recordId=active+"|"+result.forecast.strategyId+"|"+originEpoch;
-   setShadowRecords(records=>records.some(r=>r.id===recordId)?records:[...records,{id:recordId,market:active,strategyId:result.forecast.strategyId,strategyLabel:result.forecast.strategyLabel,targetDigit:result.forecast.targetDigit,contract:"MATCHES",originEpoch,status:"PENDING",createdAt:new Date().toISOString()}].slice(-500));
+   const liveLatest=(data.current[active]||[]).slice(-1)[0];
+   if(liveLatest&&Number(liveLatest.epoch)===Number(originEpoch)){
+    const recordId=active+"|"+result.forecast.strategyId+"|"+originEpoch;
+    setShadowRecords(records=>records.some(r=>r.id===recordId)?records:[...records,{id:recordId,market:active,strategyId:result.forecast.strategyId,strategyLabel:result.forecast.strategyLabel,targetDigit:result.forecast.targetDigit,contract:"MATCHES",originEpoch,status:"PENDING",createdAt:new Date().toISOString()}].slice(-500));
+   }else{setDiscoveryResult(v=>({...v,message:"Scan result arrived after the market advanced; it was not logged as a future forecast to prevent look-ahead bias."}));}
   }
  }catch(error){setDiscoveryResult({market:active,status:"ERROR",message:error.message||"Strategy discovery unavailable.",tradeEligible:false,decision:"WAIT"});}
  finally{setDiscoveryBusy(false);}
