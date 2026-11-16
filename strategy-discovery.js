@@ -4,110 +4,73 @@ const ALLOWED_MARKETS = new Set(["R_10","R_25","R_50","R_75","R_100","1HZ10V","1
 
 function countsOf(digits) {
   const counts = Array(10).fill(0);
-  digits.forEach(d => { counts[d]++; });
+  for (const digit of digits) counts[digit]++;
   return counts;
 }
-
-function chooseHot(digits) {
-  const counts = countsOf(digits);
-  return counts.indexOf(Math.max(...counts));
-}
-
-function chooseCold(digits) {
-  const counts = countsOf(digits);
-  return counts.indexOf(Math.min(...counts));
-}
-
+function chooseHot(digits) { const c=countsOf(digits); return c.indexOf(Math.max(...c)); }
+function chooseCold(digits) { const c=countsOf(digits); return c.indexOf(Math.min(...c)); }
 function chooseTransition(digits) {
-  const matrix = Array.from({ length: 10 }, () => Array(10).fill(0));
-  for (let i = 0; i < digits.length - 1; i++) matrix[digits[i]][digits[i + 1]]++;
-  const previous = digits[digits.length - 1];
-  const row = matrix[previous];
-  if (!row || row.reduce((a, b) => a + b, 0) < 5) return null;
+  const matrix=Array.from({length:10},()=>Array(10).fill(0));
+  for(let i=0;i<digits.length-1;i++) matrix[digits[i]][digits[i+1]]++;
+  const row=matrix[digits[digits.length-1]];
+  if(row.reduce((a,b)=>a+b,0)<5) return null;
   return row.indexOf(Math.max(...row));
 }
-
-function chooseRepeat(digits) {
-  if (digits.length < 2) return null;
-  return digits[digits.length - 1];
-}
-
+function chooseRepeat(digits) { return digits.length>=2?digits[digits.length-1]:null; }
 function chooseAlternate(digits) {
-  if (digits.length < 3) return null;
-  const last = digits[digits.length - 1];
-  const previous = digits[digits.length - 2];
-  if (last === previous) return null;
-  return last;
+  if(digits.length<3) return null;
+  return digits[digits.length-1]===digits[digits.length-2]?null:digits[digits.length-1];
 }
-
-const STRATEGIES = [
-  { id: "rolling-hot-100-v1", label: "Rolling hot digit · 100", window: 100, pick: chooseHot },
-  { id: "rolling-cold-100-v1", label: "Rolling cold digit · 100", window: 100, pick: chooseCold },
-  { id: "rolling-hot-250-v1", label: "Rolling hot digit · 250", window: 250, pick: chooseHot },
-  { id: "rolling-cold-250-v1", label: "Rolling cold digit · 250", window: 250, pick: chooseCold },
-  { id: "conditional-transition-250-v1", label: "Conditional transition · 250", window: 250, pick: chooseTransition },
-  { id: "repeat-last-v1", label: "Repeat-last hypothesis", window: 100, pick: chooseRepeat },
-  { id: "alternate-last-v1", label: "Alternate-last hypothesis", window: 100, pick: chooseAlternate }
+const STRATEGIES=[
+ {id:"rolling-hot-100-v1",label:"Rolling hot digit · 100",window:100,pick:chooseHot},
+ {id:"rolling-cold-100-v1",label:"Rolling cold digit · 100",window:100,pick:chooseCold},
+ {id:"rolling-hot-250-v1",label:"Rolling hot digit · 250",window:250,pick:chooseHot},
+ {id:"rolling-cold-250-v1",label:"Rolling cold digit · 250",window:250,pick:chooseCold},
+ {id:"conditional-transition-250-v1",label:"Conditional transition · 250",window:250,pick:chooseTransition},
+ {id:"repeat-last-v1",label:"Repeat-last hypothesis",window:100,pick:chooseRepeat},
+ {id:"alternate-last-v1",label:"Alternate-last hypothesis",window:100,pick:chooseAlternate}
 ];
-
-function wilsonLowerBound(wins, trials, z = 1.96) {
-  if (!trials) return 0;
-  const p = wins / trials, z2 = z * z;
-  return (p + z2 / (2 * trials) - z * Math.sqrt((p * (1 - p) + z2 / (4 * trials)) / trials)) / (1 + z2 / trials);
+function wilsonLowerBound(wins,trials,z=1.96){
+ if(!trials)return 0;
+ const p=wins/trials,z2=z*z;
+ return (p+z2/(2*trials)-z*Math.sqrt((p*(1-p)+z2/(4*trials))/trials))/(1+z2/trials);
 }
-
+function regimeSnapshot(digits){
+ const counts=countsOf(digits),n=digits.length;
+ const rates=counts.map(x=>x/n);
+ const entropy=-rates.reduce((sum,p)=>sum+(p? p*Math.log2(p):0),0);
+ const matrix=Array.from({length:10},()=>Array(10).fill(0));
+ for(let i=1;i<digits.length;i++)matrix[digits[i-1]][digits[i]]++;
+ const lastRow=matrix[digits[n-1]],rowN=lastRow.reduce((a,b)=>a+b,0);
+ const transitionEntropy=rowN?lastRow.reduce((sum,x)=>{const p=x/rowN;return sum+(p?-p*Math.log2(p):0)},0):null;
+ const maxRate=Math.max(...rates),minRate=Math.min(...rates);
+ return {label:maxRate-minRate<0.035?"BALANCED / LOW SKEW":entropy<3.0?"FREQUENCY SKEW":"MIXED / NO CLEAR REGIME",digitCounts:counts,digitEntropyBits:Number(entropy.toFixed(3)),maxDigitShare:Number(maxRate.toFixed(3)),minDigitShare:Number(minRate.toFixed(3)),lastDigit:digits[n-1],lastDigitTransitionSamples:rowN,conditionalTransitionEntropyBits:transitionEntropy===null?null:Number(transitionEntropy.toFixed(3))};
+}
 /**
- * Exploratory, one-step walk-forward replay. At each origin the strategy sees
- * only prior digits and predicts the next digit. Outcomes are not shared across
- * strategies as independent evidence; this endpoint never grants TRADE status.
+ * Exploratory retrospective replay only. At every historical origin the
+ * strategy sees preceding ticks only. This is NOT untouched shadow validation:
+ * the same supplied series is used to compare candidates, so all rankings are
+ * research hypotheses and never confer trade eligibility.
  */
-function discoverStrategies(input) {
-  const market = String(input.market || "");
-  const digits = Array.isArray(input.digits) ? input.digits.map(Number) : [];
-  if (!ALLOWED_MARKETS.has(market)) throw new Error("Unsupported market.");
-  if (digits.length > 1000 || digits.some(d => !Number.isInteger(d) || d < 0 || d > 9)) {
-    throw new Error("Provide up to 1,000 valid last digits (0–9).");
+function discoverStrategies(input){
+ const market=String(input.market||"");
+ if(!ALLOWED_MARKETS.has(market))throw new Error("Unsupported market.");
+ if(!Array.isArray(input.digits)||input.digits.length>1000||input.digits.some(d=>!Number.isInteger(d)||d<0||d>9))
+  throw new Error("Provide up to 1,000 valid last digits (0–9).");
+ const digits=input.digits;
+ if(digits.length<300)return {market,status:"WAIT",message:"Collect at least 300 sequential ticks before strategy discovery.",observations:digits.length,candidates:[],tradeEligible:false,decision:"WAIT"};
+ const candidates=STRATEGIES.map(strategy=>{
+  let trials=0,wins=0;
+  for(let target= strategy.window;target<digits.length;target++){
+   const prediction=strategy.pick(digits.slice(target-strategy.window,target));
+   if(!Number.isInteger(prediction)||prediction<0||prediction>9)continue;
+   trials++; if(prediction===digits[target])wins++;
   }
-  if (digits.length < 300) {
-    return { market, status: "WAIT", message: "Collect at least 300 sequential ticks before strategy discovery.", observations: digits.length, candidates: [] };
-  }
-
-  const candidates = STRATEGIES.map(strategy => {
-    let predictions = 0, wins = 0, brier = 0;
-    const firstOrigin = strategy.window;
-    for (let targetIndex = firstOrigin; targetIndex < digits.length; targetIndex++) {
-      const history = digits.slice(targetIndex - strategy.window, targetIndex);
-      const predicted = strategy.pick(history);
-      if (!Number.isInteger(predicted) || predicted < 0 || predicted > 9) continue;
-      const actual = digits[targetIndex];
-      predictions++;
-      if (predicted === actual) wins++;
-      // Brier score for a 10-class point forecast; descriptive only.
-      for (let d = 0; d < 10; d++) {
-        const error = (d === predicted ? 1 : 0) - (d === actual ? 1 : 0);
-        brier += error * error;
-      }
-    }
-    const rate = predictions ? wins / predictions : null;
-    return {
-      id: strategy.id, label: strategy.label, contract: "DIGIT_MATCH",
-      forecastHorizonTicks: 1, trainingWindow: strategy.window,
-      trials: predictions, wins, hitRate: rate,
-      wilsonLowerBound: predictions ? wilsonLowerBound(wins, predictions) : null,
-      brierScore: predictions ? brier / predictions : null,
-      status: predictions >= 100 ? "EXPLORATORY_CANDIDATE" : "INSUFFICIENT_EVIDENCE"
-    };
-  }).sort((a, b) => (b.hitRate ?? -1) - (a.hitRate ?? -1));
-
-  return {
-    market, status: "RESEARCH_ONLY", observations: digits.length,
-    methodology: "Chronological one-step replay; each prediction uses only preceding ticks. Candidate comparisons are exploratory and require untouched future shadow validation and multiple-testing correction.",
-    baselineHitRate: 0.10,
-    candidates,
-    tradeEligible: false,
-    decision: "WAIT",
-    execution: "DISABLED — strategy discovery does not place orders."
-  };
+  const latestHistory=digits.slice(-strategy.window);
+  const latestPrediction=strategy.pick(latestHistory);
+  return {id:strategy.id,label:strategy.label,contract:"DIGIT_MATCH",targetDigit:Number.isInteger(latestPrediction)?latestPrediction:null,forecastHorizonTicks:1,trainingWindow:strategy.window,trials,wins,hitRate:trials?wins/trials:null,wilsonLowerBound:trials?wilsonLowerBound(wins,trials):null,status:trials>=100?"EXPLORATORY_CANDIDATE":"INSUFFICIENT_EVIDENCE"};
+ }).sort((a,b)=>(b.hitRate??-1)-(a.hitRate??-1));
+ const best=candidates.find(c=>Number.isInteger(c.targetDigit))||null;
+ return {market,status:"RESEARCH_ONLY",observations:digits.length,regime:regimeSnapshot(digits),latestDigit:digits[digits.length-1],forecast:{targetDigit:best?.targetDigit??null,contract:"MATCHES",horizonTicks:1,strategyId:best?.id??null,strategyLabel:best?.label??null,reason:best?"Top retrospective candidate by exploratory hit rate; not independently validated.":"No candidate can currently issue a digit forecast."},methodology:"Chronological one-step retrospective replay: each historical prediction uses only preceding ticks. Candidate ranking is exploratory and affected by repeated hypothesis testing; it is not future shadow validation or proof of an edge.",baselineHitRate:0.10,candidates,tradeEligible:false,decision:"WAIT",execution:"DISABLED — research only; no order is placed."};
 }
-
-module.exports = { discoverStrategies, wilsonLowerBound };
+module.exports={discoverStrategies,wilsonLowerBound,regimeSnapshot};
