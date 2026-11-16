@@ -91,6 +91,7 @@ async function fetchDemoAccounts(accessToken) {
 // upgrade WAIT/NO TRADE or place orders.
 const assistantRequests = new WeakMap();
 const { evaluateAssistant } = require("./assistant-engine");
+const { discoverStrategies } = require("./strategy-discovery");
 
 app.post("/api/assistant/analyze", async (req, res) => {
   noStore(res);
@@ -129,6 +130,17 @@ app.post("/api/assistant/analyze", async (req, res) => {
     }
   }
   res.json({ ...result, commentary, aiMode, analyzedAt: new Date().toISOString() });
+});
+
+
+app.post("/api/strategy/discover", (req, res) => {
+  noStore(res);
+  try {
+    const result = discoverStrategies(req.body || {});
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Strategy discovery request is invalid." });
+  }
 });
 
 app.get("/health", (_req, res) => {
