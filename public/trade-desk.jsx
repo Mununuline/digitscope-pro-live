@@ -26,7 +26,7 @@ function App(){
   if(!runtime.current.demo||!accountRef.current||!accountRef.current.account_id){setStatus(v=>({...v,[s]:"Connect and select Demo account"}));return false}if(runtime.current.recoveryLock){setStatus(v=>({...v,[s]:"UNRESOLVED BUY · verify Deriv history before retry"}));return false}
   if(!Number.isFinite(c.stake)||c.stake<=0||c.stopLoss<=0||c.takeProfit<=0){setStatus(v=>({...v,[s]:"Set valid stake and risk limits"}));return false}
   if(pnlRef.current<=-c.stopLoss||pnlRef.current>=c.takeProfit){setStatus(v=>({...v,[s]:"SESSION LIMIT · entries blocked"}));emit("risk_block",{strategy:s,pnl:pnlRef.current});return false}
-  if(busy.current[s]||openRef.current[s]){setStatus(v=>({...v,[s]:"Already processing/open"}));return false}
+  if(busy.current[s]||openRef.current[s]){setStatus(v=>({...v,[s]:"Already processing/open"}));return false}const exposure=STRATEGY_KEYS.filter(k=>busy.current[k]||openRef.current[k]).length;if(exposure>=2){setStatus(v=>({...v,[s]:"MAX TWO OPEN/PENDING CONTRACTS · exposure cap"}));emit("exposure_block",{strategy:s,openOrPending:exposure,maxConcurrent:2});return false}
   if(!q||q.key!==key||Date.now()-q.at>5000){setStatus(v=>({...v,[s]:"Quote stale · refreshing"}));requestQuote(s);emit("stale_quote",{strategy:s});return false}
   busy.current[s]=true;const id=++req.current;requests.current[id]={kind:"buy",strategy:s,started:performance.now(),startedAt:Date.now(),source};
   setStatus(v=>({...v,[s]:"BUY SENT"}));emit("buy_sent",{strategy:s,source,market:c.market,digit:c.digit,ask:q.ask,quoteAge:Date.now()-q.at});
