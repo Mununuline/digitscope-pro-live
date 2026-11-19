@@ -302,6 +302,12 @@ app.post("/api/deriv/disconnect", (req, res) => {
   res.json({ connected: false, demoOnly: true });
 });
 
+app.get("/backoffice", (_req, res) => {
+  res.sendFile(path.join(publicDirectory, "backoffice.html"));
+});
+
+app.get("/trade", (_req, res) => res.redirect(302, "/"));
+
 app.get("*", (_req, res) => {
   res.sendFile(path.join(publicDirectory, "index.html"));
 });
