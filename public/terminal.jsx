@@ -55,7 +55,7 @@ async function placeManualMatches(){
     }
    }
   };
-  socket.onerror=()=>{if(demoTradePhase.current!=="SETTLED"){if(demoTradeTimer.current)clearTimeout(demoTradeTimer.current);demoTradePhase.current="IDLE";setTradeBusy(false);setTradeMessage("Demo WebSocket connection failed. No retry was sent automatically.")}};
+  socket.onerror=()=>{if(demoTradePhase.current==="OPEN"){demoTradePhase.current="UNKNOWN_OPEN";setTradeBusy(true);setTradeMessage("Trading connection error while a contract may be open. New entries remain locked; check Deriv contract history.")}else if(demoTradePhase.current!=="SETTLED"){if(demoTradeTimer.current)clearTimeout(demoTradeTimer.current);demoTradePhase.current="IDLE";setTradeBusy(false);setTradeMessage("Demo WebSocket connection failed before contract confirmation. No retry was sent automatically.")}};
   socket.onclose=()=>{if(demoTradePhase.current==="OPEN"){demoTradePhase.current="UNKNOWN_OPEN";setTradeBusy(true);setTradeMessage("Connection lost while contract may still be open. New entries are locked. Check Deriv contract history before unlocking.")}else if(demoTradePhase.current!=="SETTLED"&&demoTradePhase.current!=="IDLE"){if(demoTradeTimer.current)clearTimeout(demoTradeTimer.current);demoTradePhase.current="IDLE";setTradeBusy(false);setTradeMessage("Demo trading connection closed before a contract was confirmed. No automatic retry was sent.")}};
  }catch(error){if(demoTradeTimer.current)clearTimeout(demoTradeTimer.current);demoTradePhase.current="IDLE";setTradeBusy(false);setTradeMessage(error.message||"Demo order failed.");}
 }
