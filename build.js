@@ -14,7 +14,7 @@ async function main() {
     jsxFragment: "React.Fragment",
     legalComments: "none"
   });
-  console.log("DigitScope browser terminal compiled successfully.");
+  await esbuild.build({\n    entryPoints: [path.join(__dirname, "public", "trade-desk.jsx")],\n    outfile: path.join(__dirname, "public", "trade-desk.js"),\n    bundle: false, format: "iife", platform: "browser", target: ["es2020"],\n    jsx: "transform", jsxFactory: "React.createElement", jsxFragment: "React.Fragment", legalComments: "none"\n  });\n  console.log("DigitScope backoffice and trading front desk compiled successfully.");
 }
 
 main().catch((error) => {
