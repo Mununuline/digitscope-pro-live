@@ -226,7 +226,7 @@ app.get("/api/deriv/status", async (req, res) => {
   }
   try {
     const accounts = await fetchDemoAccounts(session.accessToken);
-    res.json({ connected: true, demoOnly: true, accounts });
+    res.json({ connected: true, demoOnly: true, accounts, selectedAccountId: session.selectedDemoAccountId || null });
   } catch (error) {
     const message = String(error.message || "");
     if (/401|unauthori[sz]ed|expired/i.test(message)) delete session.accessToken;
@@ -239,6 +239,57 @@ app.get("/api/deriv/status", async (req, res) => {
   }
 });
 
+app.post("/api/deriv/select-account", async (req, res) => {
+  noStore(res);
+  const session = getSession(req, res, false);
+  if (!session || !session.accessToken || session.tokenExpiresAt <= Date.now()) {
+    return res.status(401).json({ error: "Connect your Deriv account first." });
+  }
+  const accountId = String(req.body && req.body.account_id || "");
+  if (!accountId || accountId.length > 64) return res.status(400).json({ error: "Choose a valid Demo account." });
+  try {
+    const accounts = await fetchDemoAccounts(session.accessToken);
+    const account = accounts.find(item => item.account_id === accountId);
+    if (!account) return res.status(403).json({ error: "Only a Demo account linked to this Deriv login can be selected." });
+    session.selectedDemoAccountId = account.account_id;
+    res.json({ selected: true, account });
+  } catch (error) {
+    res.status(502).json({ error: "Could not verify the Demo account. " + error.message });
+  }
+});
+
+// Generate a short-lived, single-use authenticated WebSocket URL for the
+// selected Demo account. The OAuth token stays on the server.
+app.post("/api/deriv/demo-otp", async (req, res) => {
+  noStore(res);
+  const session = getSession(req, res, false);
+  if (!session || !session.accessToken || session.tokenExpiresAt <= Date.now()) {
+    return res.status(401).json({ error: "Connect Deriv before requesting a Demo trading session." });
+  }
+  const accountId = String(session.selectedDemoAccountId || "");
+  if (!accountId) return res.status(400).json({ error: "Select a Demo account first." });
+  try {
+    const accounts = await fetchDemoAccounts(session.accessToken);
+    if (!accounts.some(item => item.account_id === accountId)) {
+      delete session.selectedDemoAccountId;
+      return res.status(403).json({ error: "Selected account is no longer an eligible Demo account. Select it again." });
+    }
+    const response = await fetch(DERIV_API_BASE + "/trading/v1/options/accounts/" + encodeURIComponent(accountId) + "/otp", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + session.accessToken, Accept: "application/json" }
+    });
+    const body = await response.json().catch(() => ({}));
+    const data = body.data || body;
+    if (!response.ok || !data.url || !String(data.url).startsWith("wss://api.derivws.com/trading/v1/options/ws/demo")) {
+      const detail = body.errors && body.errors[0] && body.errors[0].message;
+      throw new Error(detail || "Deriv did not return a Demo WebSocket URL.");
+    }
+    res.json({ url: data.url, account: accounts.find(item => item.account_id === accountId) });
+  } catch (error) {
+    res.status(502).json({ error: "Unable to open the Deriv Demo trading session. " + error.message });
+  }
+});
+
 app.post("/api/deriv/disconnect", (req, res) => {
   noStore(res);
   const session = getSession(req, res, false);
@@ -246,6 +297,7 @@ app.post("/api/deriv/disconnect", (req, res) => {
     delete session.accessToken;
     delete session.tokenExpiresAt;
     delete session.oauth;
+    delete session.selectedDemoAccountId;
   }
   res.json({ connected: false, demoOnly: true });
 });
