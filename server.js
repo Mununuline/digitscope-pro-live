@@ -6,7 +6,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const publicDirectory = path.join(__dirname, "public");
 const DERIV_APP_ID = process.env.DERIV_APP_ID || "";
-const DERIV_REDIRECT_URI = process.env.DERIV_REDIRECT_URI || "https://digitscope-pro-test.onrender.com/deriv/callback";
+const DERIV_REDIRECT_URI = process.env.DERIV_REDIRECT_URI || "https://digitscope-pro-live1.onrender.com/deriv/callback";
 const DERIV_AUTH_URL = "https://auth.deriv.com/oauth2/auth";
 const DERIV_TOKEN_URL = "https://auth.deriv.com/oauth2/token";
 const DERIV_API_BASE = "https://api.derivws.com";
@@ -14,6 +14,7 @@ const COOKIE_NAME = "dsp_oauth_session";
 const sessions = new Map();
 
 app.disable("x-powered-by");
+app.use(express.json({ limit: "24kb" }));
 app.use(express.static(publicDirectory, {
   etag: true,
   maxAge: process.env.NODE_ENV === "production" ? "5m" : 0
@@ -83,6 +84,64 @@ async function fetchDemoAccounts(accessToken) {
   const accounts = Array.isArray(root) ? root : (root.accounts || root.items || []);
   return accounts.map(safeAccount).filter(account => account && account.account_id);
 }
+
+
+// AI Market Assistant: deterministic eligibility gates always own the decision.
+// An optional language model may explain the supplied evidence, but cannot
+// upgrade WAIT/NO TRADE or place orders.
+const assistantRequests = new WeakMap();
+const { evaluateAssistant } = require("./assistant-engine");
+const { discoverStrategies } = require("./strategy-discovery");
+
+app.post("/api/assistant/analyze", async (req, res) => {
+  noStore(res);
+  const session = getSession(req, res, true);
+  const now = Date.now();
+  const last = assistantRequests.get(session);
+  if (last && now - last < 2500) return res.status(429).json({ error: "Please wait before requesting another analysis." });
+  assistantRequests.set(session, now);
+  const result = evaluateAssistant(req.body || {});
+  let commentary = "Rule-based analysis is active. " + (result.reasons.length ? result.reasons.join(" ") : "All evidence gates passed.");
+  let aiMode = "RULES_ONLY";
+  if (process.env.AI_GATEWAY_API_KEY && process.env.AI_GATEWAY_MODEL) {
+    try {
+      const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + process.env.AI_GATEWAY_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: process.env.AI_GATEWAY_MODEL,
+          temperature: 0.1,
+          max_tokens: 180,
+          messages: [
+            { role: "system", content: "You are DigitScope's market-analysis explainer. Explain only the supplied verified metrics in plain concise language. Never invent evidence, probabilities, market loopholes, or forecasts. The deterministic decision is authoritative: do not change it, upgrade it, or recommend overriding it. State clearly that synthetic-index outcomes may be unpredictable." },
+            { role: "user", content: JSON.stringify({ ...result, authoritativeDecision: result.decision }) }
+          ]
+        }),
+        signal: AbortSignal.timeout(8000)
+      });
+      const body = await response.json().catch(() => ({}));
+      const text = body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content;
+      if (response.ok && typeof text === "string" && text.trim()) {
+        commentary = text.trim().slice(0, 1200);
+        aiMode = "AI_GATEWAY";
+      }
+    } catch (_) {
+      // Keep the deterministic result and fallback commentary on model failures.
+    }
+  }
+  res.json({ ...result, commentary, aiMode, analyzedAt: new Date().toISOString() });
+});
+
+
+app.post("/api/strategy/discover", (req, res) => {
+  noStore(res);
+  try {
+    const result = discoverStrategies(req.body || {});
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error.message || "Strategy discovery request is invalid." });
+  }
+});
 
 app.get("/health", (_req, res) => {
   res.status(200).json({
@@ -167,7 +226,7 @@ app.get("/api/deriv/status", async (req, res) => {
   }
   try {
     const accounts = await fetchDemoAccounts(session.accessToken);
-    res.json({ connected: true, demoOnly: true, accounts });
+    res.json({ connected: true, demoOnly: true, accounts, selectedAccountId: session.selectedDemoAccountId || null });
   } catch (error) {
     const message = String(error.message || "");
     if (/401|unauthori[sz]ed|expired/i.test(message)) delete session.accessToken;
@@ -180,6 +239,57 @@ app.get("/api/deriv/status", async (req, res) => {
   }
 });
 
+app.post("/api/deriv/select-account", async (req, res) => {
+  noStore(res);
+  const session = getSession(req, res, false);
+  if (!session || !session.accessToken || session.tokenExpiresAt <= Date.now()) {
+    return res.status(401).json({ error: "Connect your Deriv account first." });
+  }
+  const accountId = String(req.body && req.body.account_id || "");
+  if (!accountId || accountId.length > 64) return res.status(400).json({ error: "Choose a valid Demo account." });
+  try {
+    const accounts = await fetchDemoAccounts(session.accessToken);
+    const account = accounts.find(item => item.account_id === accountId);
+    if (!account) return res.status(403).json({ error: "Only a Demo account linked to this Deriv login can be selected." });
+    session.selectedDemoAccountId = account.account_id;
+    res.json({ selected: true, account });
+  } catch (error) {
+    res.status(502).json({ error: "Could not verify the Demo account. " + error.message });
+  }
+});
+
+// Generate a short-lived, single-use authenticated WebSocket URL for the
+// selected Demo account. The OAuth token stays on the server.
+app.post("/api/deriv/demo-otp", async (req, res) => {
+  noStore(res);
+  const session = getSession(req, res, false);
+  if (!session || !session.accessToken || session.tokenExpiresAt <= Date.now()) {
+    return res.status(401).json({ error: "Connect Deriv before requesting a Demo trading session." });
+  }
+  const accountId = String(session.selectedDemoAccountId || "");
+  if (!accountId) return res.status(400).json({ error: "Select a Demo account first." });
+  try {
+    const accounts = await fetchDemoAccounts(session.accessToken);
+    if (!accounts.some(item => item.account_id === accountId)) {
+      delete session.selectedDemoAccountId;
+      return res.status(403).json({ error: "Selected account is no longer an eligible Demo account. Select it again." });
+    }
+    const response = await fetch(DERIV_API_BASE + "/trading/v1/options/accounts/" + encodeURIComponent(accountId) + "/otp", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + session.accessToken, Accept: "application/json" }
+    });
+    const body = await response.json().catch(() => ({}));
+    const data = body.data || body;
+    if (!response.ok || !data.url || !String(data.url).startsWith("wss://api.derivws.com/trading/v1/options/ws/demo")) {
+      const detail = body.errors && body.errors[0] && body.errors[0].message;
+      throw new Error(detail || "Deriv did not return a Demo WebSocket URL.");
+    }
+    res.json({ url: data.url, account: accounts.find(item => item.account_id === accountId) });
+  } catch (error) {
+    res.status(502).json({ error: "Unable to open the Deriv Demo trading session. " + error.message });
+  }
+});
+
 app.post("/api/deriv/disconnect", (req, res) => {
   noStore(res);
   const session = getSession(req, res, false);
@@ -187,6 +297,7 @@ app.post("/api/deriv/disconnect", (req, res) => {
     delete session.accessToken;
     delete session.tokenExpiresAt;
     delete session.oauth;
+    delete session.selectedDemoAccountId;
   }
   res.json({ connected: false, demoOnly: true });
 });
