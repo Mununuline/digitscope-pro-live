@@ -59,7 +59,7 @@ function safeAccount(account) {
   const rawType=String(account.account_type||account.type||"").toLowerCase();
   const id=String(account.account_id||account.id||account.loginid||"");
   const isDemo=rawType==="demo"||rawType==="virtual"||account.is_virtual===true||/^VRTC/i.test(id);
-  const isReal=rawType==="real"||rawType==="live"||/^CR\\d/i.test(id);
+  const isReal=rawType==="real"||rawType==="live"||/^CR\d/i.test(id);
   if(!isDemo&&!isReal)return null;
   const balance=account.balance&&typeof account.balance==="object"?account.balance.balance:account.balance;
   return {account_id:id,account_type:isDemo?"demo":"real",currency:String(account.currency||""),balance:Number.isFinite(Number(balance))?Number(balance):null,display_name:String(account.display_name||account.name||(isDemo?"Deriv Demo":"Deriv Real"))};
@@ -290,8 +290,9 @@ app.post("/api/deriv/disconnect", (req, res) => {
     delete session.tokenExpiresAt;
     delete session.oauth;
     delete session.selectedAccountId;
+    delete session.selectedAccountType;
   }
-  res.json({ connected: false,  });
+  res.json({ connected: false });
 });
 
 app.get("/backoffice", (_req, res) => {
