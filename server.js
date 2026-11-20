@@ -226,9 +226,8 @@ app.get("/api/deriv/status", async (req, res) => {
     if (/401|unauthori[sz]ed|expired/i.test(message)) delete session.accessToken;
     res.status(502).json({
       connected: Boolean(session.accessToken),
-      ,
       accounts: [],
-      error: "Unable to retrieve Demo account details from Deriv. " + message
+      error: "Unable to retrieve Deriv account details. " + message
     });
   }
 });
@@ -240,7 +239,7 @@ app.post("/api/deriv/select-account", async (req, res) => {
     return res.status(401).json({ error: "Connect your Deriv account first." });
   }
   const accountId = String(req.body && req.body.account_id || "");
-  if (!accountId || accountId.length > 64) return res.status(400).json({ error: "Choose a valid Demo account." });
+  if (!accountId || accountId.length > 64) return res.status(400).json({ error: "Choose a valid Deriv account." });
   try {
     const accounts = await fetchAccounts(session.accessToken);
     const account = accounts.find(item => item.account_id === accountId);
@@ -249,7 +248,7 @@ app.post("/api/deriv/select-account", async (req, res) => {
     session.selectedAccountType = account.account_type;
     res.json({ selected: true, account });
   } catch (error) {
-    res.status(502).json({ error: "Could not verify the Demo account. " + error.message });
+    res.status(502).json({ error: "Could not verify the Deriv account. " + error.message });
   }
 });
 
@@ -278,7 +277,7 @@ app.post("/api/deriv/trading-otp", async (req, res) => {
     if(!response.ok||!data.url||!String(data.url).startsWith(expected)){const detail=body.errors&&body.errors[0]&&body.errors[0].message;throw new Error(detail||"Deriv did not return the expected "+accountType+" WebSocket URL.");}
     res.json({url:data.url,account:selected});
   } catch (error) {
-    res.status(502).json({ error: "Unable to open the Deriv Demo trading session. " + error.message });
+    res.status(502).json({ error: "Unable to open the Deriv trading session. " + error.message });
   }
 });
 
